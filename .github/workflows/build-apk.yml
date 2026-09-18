@@ -26,17 +26,38 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Capacitor Sync and Add Service Config
+      - name: Capacitor Sync and Safe Manifest Update
         run: |
           npx cap add android || true
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          
-          # Dodanie uprawnień
-          sed -i '/<manifest/a \    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />' $MANIFEST
-          
-          # Rejestracja usługi w tle w sekcji application
-          sed -i '/<application/a \        <service android:name="de.appplant.cordova.plugin.background.ForegroundService" android:foregroundServiceType="microphone" android:exported="false" />' $MANIFEST
+          python3 -c '
+          path = "android/app/src/main/AndroidManifest.xml"
+          with open(path, "r") as f:
+              content = f.read()
 
+          permissions = """
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+          """
+
+          service = """
+              <service android:name="de.appplant.cordova.plugin.background.ForegroundService" android:foregroundServiceType="microphone" android:exported="false" />
+          """
+
+          if "</manifest>" in content and "RECORD_AUDIO" not in content:
+              content = content.replace("</manifest>", f"{permissions}\n</manifest>")
+          if "</application>" in content and "ForegroundService" not in content:
+              content = content.replace("</application>", f"{service}\n</application>")
+
+          with open(path, "w") as f:
+              f.write(content)
+          '
           npx cap sync android
 
       - name: Build APK
