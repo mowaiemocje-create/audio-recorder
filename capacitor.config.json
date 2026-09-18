@@ -1,0 +1,7 @@
+JSON
+{
+  "appId": "com.example.audiorecorder",
+  "appName": "Audio Recorder",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}

@@ -1,0 +1,26 @@
+{
+  "name": "PitchRec — Rejestrator Audio",
+  "short_name": "PitchRec",
+  "description": "Rejestrator audio z analizą pitch w czasie rzeczywistym",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["music", "utilities"],
+  "lang": "pl"
+}

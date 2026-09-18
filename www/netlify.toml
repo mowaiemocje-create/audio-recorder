@@ -1,0 +1,10 @@
+[[redirects]]
+  from = "/api/*"
+  to = "http://newspeech.nazwa.pl/api/:splat"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/map.html"
+  [headers.values]
+    Content-Security-Policy = "default-src *; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; img-src * data: blob:; connect-src *; frame-src *;"

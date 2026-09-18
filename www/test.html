@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PitchRec — Diagnostyka</title>
+<script src="shared.js"></script>
+<style>
+body{background:#0a0a12;color:#dde0f0;font-family:'Courier New',monospace;padding:16px;font-size:12px}
+h2{color:#00e5a0;margin-bottom:12px}
+.box{background:#161628;border:1px solid #1e1e32;border-radius:8px;padding:12px;margin-bottom:10px}
+.ok{color:#00e5a0}.warn{color:#ffb830}.err{color:#ff5050}
+button{padding:10px 16px;border-radius:8px;border:1px solid #8b7eff;background:rgba(139,126,255,.15);color:#8b7eff;font-family:'Courier New',monospace;cursor:pointer;margin:4px;font-size:12px}
+pre{white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:200px;overflow-y:auto}
+canvas{border:1px solid #1e1e32;border-radius:4px;background:#05050e;display:block;margin-top:8px}
+</style>
+</head>
+<body>
+<h2>🔬 PitchRec Diagnostyka</h2>
+
+<div class="box">
+  <b>1. IndexedDB — próbki trenera</b>
+  <div id="dbResult">Ładowanie...</div>
+  <button onclick="checkDB()">Odśwież DB</button>
+  <button onclick="clearDB()">Wyczyść DB</button>
+</div>
+
+<div class="box">
+  <b>2. Mikrofon + Pitch</b>
+  <button onclick="startMic()">Start mikrofon</button>
+  <button onclick="stopMic()">Stop</button>
+  <div id="micStatus">—</div>
+  <canvas id="waveC" width="340" height="60"></canvas>
+  <div id="pitchResult" style="font-size:24px;font-weight:700;margin-top:8px;color:#e8d000">—</div>
+</div>
+
+<div class="box">
+  <b>3. Test modelu (symulacja)</b>
+  <button onclick="testModel()">Testuj model z DB</button>
+  <div id="modelResult">—</div>
+</div>
+
+<script>
+const SR = 44100;
+let audioCtx=null, analyser=null, stream=null, raf=null;
+
+// ── DB CHECK ──
+function checkDB(){
+  document.getElementById('dbResult').textContent='Sprawdzam...';
+  PR.openDB(()=>{
+    PR.dbAll(rows=>{
+      if(!rows.length){
+        document.getElementById('dbResult').innerHTML='<span class="warn">Brak próbek w DB. Idź do Trenera i nagraj wzorce.</span>';
+        return;
+      }
+      let html='<span class="ok">✓ Znaleziono '+rows.length+' próbek:</span><br>';
+      rows.forEach(r=>{
+        const fOk=Array.isArray(r.features)&&r.features.length===8;
+        html+=`<span class="${fOk?'ok':'err'}">${r.vowel}/${r.type} — dur:${(r.dur||0).toFixed(1)}s — features[8]:${fOk?'✓':'✗ BŁĄD: '+JSON.stringify(r.features).slice(0,60)}</span><br>`;
+      });
+      document.getElementById('dbResult').innerHTML=html;
+    });
+  });
+}
+checkDB();
+
+function clearDB(){
+  if(!confirm('Usunąć wszystkie próbki?')) return;
+  PR.openDB(()=>{
+    const tx=PR.db.transaction('samples','readwrite');
+    tx.objectStore('samples').clear();
+    tx.oncomplete=()=>{document.getElementById('dbResult').innerHTML='<span class="warn">DB wyczyszczona</span>';};
+  });
+}
+
+// ── MIC + PITCH ──
+async function startMic(){
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:SR});
+    analyser=audioCtx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0.1;
+    const src=audioCtx.createMediaStreamSource(stream); src.connect(analyser);
+    document.getElementById('micStatus').innerHTML='<span class="ok">✓ Mikrofon aktywny</span>';
+    raf=requestAnimationFrame(loop);
+  }catch(e){document.getElementById('micStatus').innerHTML='<span class="err">Błąd: '+e.message+'</span>';}
+}
+function stopMic(){
+  cancelAnimationFrame(raf);
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  if(audioCtx)audioCtx.close();
+  audioCtx=null;analyser=null;
+  document.getElementById('micStatus').innerHTML='<span class="warn">Zatrzymano</span>';
+  document.getElementById('pitchResult').textContent='—';
+}
+
+const wC=document.getElementById('waveC'), wX=wC.getContext('2d');
+function loop(){
+  if(!analyser)return;
+  raf=requestAnimationFrame(loop);
+  const N=analyser.frequencyBinCount;
+  const td=new Uint8Array(N), fd=new Float32Array(N);
+  analyser.getByteTimeDomainData(td); analyser.getFloatTimeDomainData(fd);
+  // RMS
+  let rms=0; for(let i=0;i<N;i++) rms+=fd[i]*fd[i]; rms=Math.sqrt(rms/N);
+  // Draw waveform
+  const W=wC.width,H=wC.height,MID=H/2;
+  wX.fillStyle='#05050e';wX.fillRect(0,0,W,H);
+  wX.strokeStyle='rgba(0,229,160,.9)';wX.lineWidth=1.5;wX.beginPath();
+  for(let x=0;x<W;x++){const v=(td[Math.floor(x/W*N)]/128)-1;x===0?wX.moveTo(x,MID+v*MID*.9):wX.lineTo(x,MID+v*MID*.9);}
+  wX.stroke();
+  // Pitch
+  const f=autocorr(fd,SR);
+  document.getElementById('pitchResult').textContent=
+    f>0?`${noteFromFreq(f)} (${Math.round(f)}Hz) RMS:${rms.toFixed(4)}`:`— RMS:${rms.toFixed(4)} (freq:${f})`;
+}
+
+function autocorr(buf,sr){
+  const N=buf.length; let rms=0; for(let i=0;i<N;i++) rms+=buf[i]*buf[i];
+  const r=Math.sqrt(rms/N);
+  if(r<0.002) return -1; // very low threshold for test
+  let r1=0,r2=N-1;
+  for(let i=0;i<N/2;i++) if(Math.abs(buf[i])<0.2){r1=i;break;}
+  for(let i=1;i<N/2;i++) if(Math.abs(buf[N-i])<0.2){r2=N-i;break;}
+  const b=buf.slice(r1,r2),L=b.length; if(L<20) return -2;
+  const c=new Float32Array(L);
+  for(let i=0;i<L;i++) for(let j=0;j<L-i;j++) c[i]+=b[j]*b[j+i];
+  let d=0; while(d<L-1&&c[d]>c[d+1])d++;
+  let mx=-1,mp=-1; for(let i=d;i<L;i++) if(c[i]>mx){mx=c[i];mp=i;}
+  if(mp<2) return -3;
+  const x1=c[mp-1],x2=c[mp],x3=c[mp+1];
+  const a=(x1+x3-2*x2)/2,bv=(x3-x1)/2; if(a)mp-=bv/(2*a);
+  return sr/mp;
+}
+const NOTES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+function noteFromFreq(f){
+  const st=12*Math.log2(f/440)+57;
+  return NOTES[((Math.round(st)%12)+12)%12]+Math.floor(Math.round(st)/12);
+}
+
+// ── MODEL TEST ──
+function testModel(){
+  PR.openDB(()=>{
+    PR.dbAll(rows=>{
+      if(!rows.length){document.getElementById('modelResult').innerHTML='<span class="warn">Brak próbek w DB</span>';return;}
+      const model=PR.buildModel(rows);
+      let html='<b>Model:</b><br>';
+      Object.entries(model).forEach(([v,m])=>{
+        const ok=m.good.length>0&&m.bad.length>0;
+        html+=`<span class="${ok?'ok':'warn'}">${v}: good=${m.good.length}, bad=${m.bad.length} ${ok?'✓':'— potrzeba obu'}</span><br>`;
+        if(ok&&m.good.length){
+          // Test score a "good" sample against itself
+          const feat=m.good[0];
+          const s=PR.score(feat,m);
+          html+=`  → Test score (dobra próbka vs model): <span class="${s>=60?'ok':'err'}">${s}%</span> ${s>=60?'✓':'✗ BŁĄD dist'}<br>`;
+          html+=`  Cechy[0]: ${feat.slice(0,4).map(x=>x.toFixed(4)).join(', ')}<br>`;
+        }
+      });
+      document.getElementById('modelResult').innerHTML=html;
+    });
+  });
+}
+</script>
+</body>
+</html>

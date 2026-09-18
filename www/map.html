@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="color-scheme" content="light only">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>PitchRec — Mapa Live</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,sans-serif;overflow:hidden}
+body{display:flex;flex-direction:column;height:100dvh;background:#f5f5f5}
+#topbar{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:env(safe-area-inset-top,8px) 12px 8px;background:#F8F6F2;border-bottom:1px solid #ddd;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.back-btn{border:1px solid #ddd;border-radius:8px;background:#F8F6F2;color:#555;font-size:11px;padding:5px 10px;cursor:pointer;font-weight:600;white-space:nowrap}
+.title{font-size:12px;font-weight:700;color:#1A1A1A;flex:1;letter-spacing:.5px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:#e53935;animation:blink 1s infinite;display:none;flex-shrink:0}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.badge{font-size:10px;color:#888880880;white-space:nowrap}
+
+#mapwrap{flex:1;position:relative}
+#map{position:absolute;inset:0}
+
+.ctrl{background:rgba(248,246,242,.95);border:0.5px solid rgba(0,0,0,.15);border-radius:8px;padding:5px 9px;font-size:11px;font-weight:700;color:#444;cursor:pointer;touch-action:manipulation}
+.ctrl.on{background:#E8820C;color:#fff;border-color:#E8820C}
+#toastBox{position:absolute;bottom:44px;left:50%;transform:translateX(-50%);z-index:2000;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;width:90%;max-width:340px}
+.toast{background:rgba(26,26,26,.88);color:#fff;border-radius:12px;padding:9px 14px;font-size:12px;display:flex;align-items:center;gap:8px;animation:slideUp .3s ease;width:100%}
+@keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.toast-icon{font-size:18px;flex-shrink:0}
+.toast-body{flex:1;min-width:0}
+.toast-name{font-weight:700;color:#00e5a0}
+.toast-detail{font-size:10px;color:#aaa;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* #availPanel positioning now handled inline in HTML (flex column with mapAvailBtn) */
+.avail-badge{background:rgba(248,246,242,.95);border:1.5px solid #e53935;border-radius:10px;padding:5px 10px;font-size:11px;font-weight:700;color:#e53935;cursor:pointer;display:flex;align-items:center;gap:5px}
+.avail-count{background:#e53935;color:#fff;border-radius:10px;padding:1px 6px;font-size:10px}
+#legendOverlay{position:absolute;bottom:0;left:0;right:0;z-index:999;padding:5px 10px env(safe-area-inset-bottom,5px);background:rgba(248,246,242,.88);display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px 10px;pointer-events:none}
+.leg{display:flex;align-items:center;gap:3px;font-size:9px;color:#444}
+.ldot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+#statusTxt{font-size:9px;color:#888880880;width:100%;text-align:center}
+
+.leaflet-popup-content-wrapper{border-radius:10px!important;box-shadow:0 4px 16px rgba(0,0,0,.2)!important}
+.map-marker-shadow path,.map-marker-shadow{filter:drop-shadow(0 1px 3px rgba(0,0,0,.4))}
+.marker-live{animation:markerPulse 2s ease-in-out infinite}
+@keyframes markerPulse{0%,100%{opacity:1}50%{opacity:.7}}
+.marker-new{animation:markerNewPulse .5s ease-out 4}
+@keyframes markerNewPulse{0%{transform:scale(1);opacity:1}50%{transform:scale(1.8);opacity:.5}100%{transform:scale(1);opacity:1}}
+.pw{min-width:130px}
+.pw b{color:#1a73e8;display:block;font-size:13px;margin-bottom:2px}
+.pw .pc{font-size:11px;color:#555}
+.pw .pcity{font-size:10px;color:#888880880}
+.pw .pt{font-size:10px;color:#999;margin-top:3px}
+.pw .pp{font-size:9px;color:#bbb;margin-top:2px}
+.pw .pphone{margin-top:6px;padding:6px 10px;background:#FFF5E8;border-radius:8px;font-size:12px;font-weight:700;color:#C47000;display:flex;align-items:center;gap:5px}
+</style>
+</head>
+<body>
+
+<!-- BLOKADA — mapa dostępna tylko dla zalogowanych kursantów NS -->
+<div id="authGate" style="position:fixed;inset:0;z-index:99999;background:#F8F6F2;display:none;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center">
+  <div style="font-size:56px;margin-bottom:16px">🔒</div>
+  <div style="font-size:18px;font-weight:900;color:#1A1A1A;margin-bottom:8px" id="authGateTitle">Mapa dostępna po zalogowaniu</div>
+  <div style="font-size:13px;color:#888880;margin-bottom:24px;max-width:320px" id="authGateDesc">Zaloguj się w apce NewSpeech, żeby zobaczyć mapę aktywności kursantów</div>
+  <button onclick="location.href='index.html'" style="padding:12px 28px;border-radius:10px;border:none;background:#E8820C;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Wróć do apki i zaloguj się</button>
+</div>
+<script>
+  // Sprawdź logowanie ZANIM cokolwiek się załaduje — ten sam token co w głównej apce (localStorage współdzielony)
+  window.__AUTH_OK__ = !!localStorage.getItem('ns_jwt');
+  if (!window.__AUTH_OK__) {
+    document.getElementById('authGate').style.display = 'flex';
+    document.documentElement.style.overflow = 'hidden';
+  }
+</script>
+
+<div id="topbar">
+  <button class="back-btn" onclick="history.back()">← Wróć</button>
+  <div class="title">📍 MAPA LIVE</div>
+  <button id="btnCatFilter" onclick="toggleCatFilterPanel()" style="border:1px solid #ddd;border-radius:8px;background:#fff;color:#555;font-size:11px;padding:5px 8px;cursor:pointer;font-weight:600">🎨 Kategorie</button>
+  <button onclick="togglePolandBoard()" style="border:1px solid #ddd;border-radius:8px;background:#fff;color:#555;font-size:11px;padding:5px 8px;cursor:pointer;font-weight:600">🇵🇱 Mapa Polski</button>
+  <button onclick="document.getElementById('csvSyncInput').click()" style="border:1px solid #ddd;border-radius:8px;background:#fff;color:#555;font-size:11px;padding:5px 8px;cursor:pointer;font-weight:600">📥 Sync CSV</button>
+  <input type="file" id="csvSyncInput" accept=".csv,text/csv" style="display:none" onchange="onCsvSyncSelected(this)">
+  <div class="live-dot" id="liveDot"></div>
+  <div class="badge" id="cntBadge">Ładowanie…</div>
+</div>
+<div id="csvSyncStatus" style="display:none;position:absolute;top:52px;left:8px;right:8px;z-index:1500;background:#fff;border-radius:10px;padding:10px 14px;font-size:12px;box-shadow:0 4px 20px rgba(0,0,0,.15)"></div>
+
+<!-- Panel filtra kategorii — chipsy kolorowe, kliknięcie filtruje mapę -->
+<div id="catFilterPanel" style="display:none;position:absolute;top:52px;left:8px;right:8px;z-index:1500;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.2);padding:12px;max-height:60vh;overflow-y:auto">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div style="font-size:12px;font-weight:700;color:#1A1A1A">Filtruj wg kategorii</div>
+    <button onclick="clearCatFilter()" style="border:none;background:none;color:#E8820C;font-size:11px;font-weight:700;cursor:pointer">✕ Pokaż wszystkie</button>
+  </div>
+  <div id="catFilterChips" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+  <div style="border-top:1px solid #eee;margin-top:10px;padding-top:10px">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;touch-action:manipulation">
+      <input type="checkbox" id="onlyMineCheckbox" onchange="toggleOnlyMine()" style="width:18px;height:18px;accent-color:#E8820C">
+      <span style="font-size:12px;font-weight:600;color:#1A1A1A">📍 Pokaż tylko moje punkty</span>
+    </label>
+  </div>
+</div>
+
+<!-- Plansza Polski — punkty odwagi wg województw -->
+<div id="polandBoard" style="display:none;position:fixed;inset:0;z-index:5000;background:#F8F6F2;overflow-y:auto;padding:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <div style="font-size:18px;font-weight:900;color:#1A1A1A">🇵🇱 Mapa odwagi</div>
+    <button onclick="togglePolandBoard()" style="border:none;background:none;font-size:24px;color:#888;cursor:pointer">✕</button>
+  </div>
+  <div id="polandTotalPts" style="font-size:13px;color:#888880;margin-bottom:16px">Wczytywanie…</div>
+  <div id="polandGrid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;max-width:600px;margin:0 auto"></div>
+  <div style="margin-top:20px;font-size:11px;color:#888880;text-align:center;line-height:1.6">
+    Punkty odwagi: Sklepy/Przechodzień/Miasto = 1pkt · Telefon = 2pkt · <b>Wystąpienie = 5pkt</b>
+  </div>
+  <div id="outsidePolandBox" style="margin-top:24px"></div>
+</div>
+
+<div id="mapwrap">
+  <div id="map"></div>
+  <!-- Warstwy — prawy górny, pionowo. Zoom Leaflet będzie bottomright. -->
+  <div style="position:absolute;top:8px;right:8px;z-index:1000;display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+    <button class="ctrl on" id="btnMap" onclick="setLayer('osm')">🗺 Mapa</button>
+    <button class="ctrl" id="btnSat" onclick="setLayer('sat')">🛰 Satelita</button>
+    <button class="ctrl" id="btnHeat" onclick="toggleHeatmap()" style="border-color:rgba(229,57,53,.4);color:#888">🌡 Cieplna</button>
+  </div>
+  <!-- Dostępni + Dostępny — lewy górny, pionowo -->
+  <div style="position:absolute;top:8px;left:8px;z-index:1000;display:flex;flex-direction:column;gap:4px;align-items:flex-start">
+    <button class="ctrl" id="mapAvailBtn" onclick="toggleMapAvail()" style="border-color:#e53935;color:#999">📞 Niedostępny</button>
+    <div id="availPanel" style="display:none">
+      <div class="avail-badge" onclick="focusAvail()">
+        📞 Dostępni <span class="avail-count" id="availCount">0</span>
+      </div>
+    </div>
+  </div>
+  <div id="toastBox"></div>
+  <div id="legendOverlay">
+    <div class="leg"><div class="ldot" style="background:#2e7d32"></div>Live</div>
+    <div class="leg"><div class="ldot" style="background:#ffb300;border:1px solid #f57f17"></div>Ty</div>
+    <div class="leg"><div class="ldot" style="background:#a5d6a7;border:1px solid #66bb6a"></div>Historia</div>
+    <div class="leg"><div class="ldot" style="background:#e53935"></div>📞 Dostępny</div>
+    <div id="statusTxt">Ładowanie…</div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+// Twarda blokada — jeśli brak logowania, zatrzymaj cały ten blok skryptu (mapa/dane nigdy się nie zainicjują)
+if (!window.__AUTH_OK__) { throw new Error('AUTH_REQUIRED'); }
+const NS_BASE='https://pitchrec-proxy.mowaiemocje.workers.dev';
+// Wybór serwera NS ustawiony w głównej aplikacji (index.html) — czytamy tę samą wartość
+// z localStorage, żeby mapa (osobny plik, osobny kontekst JS) łączyła się z tym samym
+// serwerem co reszta aplikacji, a nie zawsze domyślnie ze standardowym.
+var nsServerChoice=localStorage.getItem('pitchrec_ns_server')||'standard';
+(function(){
+  var _origFetch=window.fetch.bind(window);
+  window.fetch=function(url,opts){
+    opts=opts||{};
+    if(typeof url==='string'&&url.indexOf(NS_BASE)===0){
+      opts=Object.assign({},opts);
+      if(opts.headers instanceof Headers){
+        opts.headers=new Headers(opts.headers);
+        opts.headers.set('X-NS-Server',nsServerChoice);
+      }else{
+        opts.headers=Object.assign({},opts.headers||{},{'X-NS-Server':nsServerChoice});
+      }
+    }
+    return _origFetch(url,opts);
+  };
+})();
+
+// ══════════════════════════════════════════════════════════════
+// SYNCHRONIZACJA CSV KWESTIONARIUSZA — wgraj eksport odpowiedzi Google Forms,
+// żeby uzupełnić brakujące punkty na tej mapie (te które z jakiegoś powodu
+// nie trafiły tu automatycznie przy nagrywaniu). Chronione hasłem.
+// ══════════════════════════════════════════════════════════════
+var CSV_SYNC_PASSWORD='nowamowa2026';
+
+function parseSimpleCSV(text){
+  var rows=[]; var row=[]; var field=''; var inQuotes=false;
+  for(var i=0;i<text.length;i++){
+    var c=text[i], next=text[i+1];
+    if(inQuotes){
+      if(c==='"'&&next==='"'){field+='"';i++;}
+      else if(c==='"'){inQuotes=false;}
+      else field+=c;
+    } else {
+      if(c==='"')inQuotes=true;
+      else if(c===','){row.push(field);field='';}
+      else if(c==='\r'){}
+      else if(c==='\n'){row.push(field);rows.push(row);row=[];field='';}
+      else field+=c;
+    }
+  }
+  if(field.length||row.length){row.push(field);rows.push(row);}
+  return rows;
+}
+
+function onCsvSyncSelected(input){
+  var file=input.files[0];
+  if(!file)return;
+  var pass=prompt('Podaj hasło synchronizacji:');
+  if(pass!==CSV_SYNC_PASSWORD){
+    if(pass!==null) alert('❌ Nieprawidłowe hasło');
+    input.value='';
+    return;
+  }
+  var statusEl=document.getElementById('csvSyncStatus');
+  statusEl.style.display='block';
+  statusEl.textContent='⏳ Wczytywanie pliku...';
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try{ syncFromCsvText(e.target.result); }
+    catch(err){ statusEl.textContent='❌ Błąd: '+err.message; }
+    input.value='';
+  };
+  reader.readAsText(file,'utf-8');
+}
+
+async function syncFromCsvText(text){
+  var statusEl=document.getElementById('csvSyncStatus');
+  var rows=parseSimpleCSV(text);
+  if(rows.length<2){ statusEl.textContent='❌ Plik pusty lub nieprawidłowy'; return; }
+  var headers=rows[0];
+  var idxName=headers.indexOf('Imię');
+  var idxCat=headers.indexOf('Kategoria');
+  var idxGPS=headers.indexOf('GPS');
+  var idxTs=headers.indexOf('Sygnatura czasowa');
+  var idxSys=headers.indexOf('System Nowej Mowy');
+  if(idxGPS===-1){ statusEl.textContent='❌ Nie znaleziono kolumny "GPS" w pliku'; return; }
+
+  var points=[];
+  var skippedNoGps=0;
+  for(var i=1;i<rows.length;i++){
+    var row=rows[i];
+    if(!row||row.length<2)continue;
+    var gpsRaw=(row[idxGPS]||'').trim();
+    if(!gpsRaw){ skippedNoGps++; continue; }
+    var parts=gpsRaw.split(',').map(function(s){return s.trim();});
+    if(parts.length<2){ skippedNoGps++; continue; }
+    var lat=parseFloat(parts[0]), lon=parseFloat(parts[1]);
+    if(isNaN(lat)||isNaN(lon)){ skippedNoGps++; continue; }
+    var name=idxName!==-1?(row[idxName]||'').trim():'';
+    var cat=idxCat!==-1?(row[idxCat]||'').trim():'';
+    if(!name||!cat){ skippedNoGps++; continue; }
+    var tsRaw=idxTs!==-1?row[idxTs]:'';
+    var tsMs=Date.parse(tsRaw.replace(' ','T'));
+    if(isNaN(tsMs)) tsMs=Date.now();
+    var sysVal=idxSys!==-1?(row[idxSys]||'').trim():'';
+    points.push({lat:lat, lon:lon, name:name, cat:cat, userId:name, city:'', ts:tsMs, sys:sysVal});
+  }
+
+  if(!points.length){
+    statusEl.textContent='❌ Nie znaleziono żadnych poprawnych punktów (pominięto '+skippedNoGps+')';
+    return;
+  }
+
+  statusEl.textContent='⏳ Wysyłanie '+points.length+' punktów na serwer...';
+  var BATCH=200;
+  var totalSaved=0, failedBatches=0;
+  for(var i=0;i<points.length;i+=BATCH){
+    var batch=points.slice(i,i+BATCH);
+    try{
+      var r=await fetch(NS_BASE+'/map/hist',{
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(batch)
+      });
+      var d=await r.json();
+      if(r.ok) totalSaved+=(d.saved||batch.length);
+      else failedBatches++;
+    }catch(e){ failedBatches++; }
+  }
+
+  statusEl.textContent='✅ Wysłano '+totalSaved+' punktów'+(skippedNoGps?' (pominięto '+skippedNoGps+')':'')+(failedBatches?' — ⚠️ '+failedBatches+' paczek nieudanych':'')+'. Odśwież mapę żeby zobaczyć nowe punkty.';
+}
+
+
+
+const HIST_DATA=[]; // USUNIĘTE 418 punktów na stałe wbudowanych w kod — bezpieczeństwo: wszystkie dane teraz TYLKO z serwera (z weryfikacją logowania), nic nie jest widoczne bez ważnego tokena
+
+var map, myMarker=null;
+var liveMarkers={}, histMarkers={}, availMarkers={};
+var firstLoad=true; // flaga: czy to pierwsze ładowanie (bez pulsowania) czy kolejne odświeżenie (nowe punkty pulsują)
+var knownLiveKeys=new Set();
+var knownAvailKeys=new Set();
+var mapOpenedAt=Date.now(); // czas otwarcia mapy - do filtrowania starych punktów
+var geocodeCache={};
+
+// Warstwy
+var osmLayer=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'});
+var satLayer=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'© Esri'});
+
+map=L.map('map',{zoomControl:false}).setView([51.9,19.1],5);
+L.control.zoom({position:'bottomright'}).addTo(map);
+osmLayer.addTo(map);
+
+function setLayer(t){
+  if(t==='osm'){satLayer.remove();osmLayer.addTo(map);}
+  else{osmLayer.remove();satLayer.addTo(map);}
+  document.getElementById('btnMap').classList.toggle('on',t==='osm');
+  document.getElementById('btnSat').classList.toggle('on',t==='sat');
+}
+
+// Kolory wg kategorii
+// ── MAPA POLSKI — WOJEWÓDZTWA (klasyfikacja przez najbliższe centrum, bez wywołań API) ──
+// Przybliżone centra 16 województw — punkt trafia do najbliższego (Voronoi), szybkie i offline
+var VOIVODESHIPS=[
+  {n:'Dolnośląskie',lat:51.11,lon:17.03},
+  {n:'Kujawsko-Pomorskie',lat:53.02,lon:18.30},
+  {n:'Lubelskie',lat:51.25,lon:22.57},
+  {n:'Lubuskie',lat:52.20,lon:15.30},
+  {n:'Łódzkie',lat:51.77,lon:19.46},
+  {n:'Małopolskie',lat:50.06,lon:19.94},
+  {n:'Mazowieckie',lat:52.23,lon:21.01},
+  {n:'Opolskie',lat:50.67,lon:17.93},
+  {n:'Podkarpackie',lat:50.04,lon:21.99},
+  {n:'Podlaskie',lat:53.13,lon:23.16},
+  {n:'Pomorskie',lat:54.35,lon:18.65},
+  {n:'Śląskie',lat:50.26,lon:19.02},
+  {n:'Świętokrzyskie',lat:50.87,lon:20.63},
+  {n:'Warmińsko-Mazurskie',lat:53.78,lon:20.48},
+  {n:'Wielkopolskie',lat:52.41,lon:16.93},
+  {n:'Zachodniopomorskie',lat:53.43,lon:14.55}
+];
+// Prosty układ siatki przybliżający geograficzne rozmieszczenie województw (NW→SE)
+var VOIVODESHIP_GRID=[
+  null,'Zachodniopomorskie','Pomorskie','Warmińsko-Mazurskie',null,
+  'Lubuskie','Wielkopolskie','Kujawsko-Pomorskie','Podlaskie',null,
+  null,'Łódzkie','Mazowieckie',null,null,
+  'Dolnośląskie','Opolskie','Śląskie','Świętokrzyskie','Lubelskie',
+  null,'Małopolskie','Podkarpackie',null,null
+];
+
+// Rough bounding box Polski — jeśli punkt wyraźnie poza, klasyfikujemy jako zagranica
+function isRoughlyInPoland(lat,lon){
+  return lat>=48.9 && lat<=55.0 && lon>=13.8 && lon<=24.3;
+}
+function getVoivodeship(lat,lon){
+  if(!isRoughlyInPoland(lat,lon))return null;
+  var best=null,bestD=Infinity;
+  VOIVODESHIPS.forEach(function(v){
+    var d=(v.lat-lat)*(v.lat-lat)+(v.lon-lon)*(v.lon-lon);
+    if(d<bestD){bestD=d;best=v.n;}
+  });
+  return best;
+}
+
+// Punkty odwagi wg trudności kategorii
+var CATEGORY_POINTS={
+  'Sklepy':1,'Przechodzień':1,'Miasto - inne':1,
+  'Telefon do miasta':2,'Telefon rodzina/znajomi':1,'Phone do Kursanta/Trenera':1,
+  'Wystąpienie':5,
+  'Restauracja Kelner':2,'McDrive, DriveThru':2
+};
+function pointsForCat(cat){return CATEGORY_POINTS[cat]||1;}
+
+// Gradient intensywności: brak=szary, niski=niebieski, średni=zielony, wysoki=żółty, max=czerwony
+function intensityColor(t){ // t = 0..1
+  var stops=[
+    {p:0,   r:224,g:224,b:224}, // szary — brak aktywności
+    {p:0.15,r:66, g:135,b:245}, // niebieski
+    {p:0.45,r:52, g:199,b:89},  // zielony
+    {p:0.75,r:255,g:204,b:0},   // żółty
+    {p:1,   r:255,g:59, b:48}   // czerwony
+  ];
+  var s1=stops[0],s2=stops[1];
+  for(var i=0;i<stops.length-1;i++){
+    if(t>=stops[i].p&&t<=stops[i+1].p){s1=stops[i];s2=stops[i+1];break;}
+  }
+  var range=s2.p-s1.p;
+  var f=range>0?(t-s1.p)/range:0;
+  var r=Math.round(s1.r+(s2.r-s1.r)*f);
+  var g=Math.round(s1.g+(s2.g-s1.g)*f);
+  var b=Math.round(s1.b+(s2.b-s1.b)*f);
+  return 'rgb('+r+','+g+','+b+')';
+}
+
+function togglePolandBoard(){
+  var el=document.getElementById('polandBoard');
+  var show=el.style.display==='none';
+  el.style.display=show?'block':'none';
+  if(show)renderPolandBoard();
+}
+
+function renderPolandBoard(){
+  // Zbierz wszystkie punkty z histMarkers (już zawiera HIST_DATA + Firebase, bez podwójnego liczenia)
+  var voivPoints={}; // nazwa -> suma punktów
+  var voivCounts={}; // nazwa -> liczba nagrań
+  var outsidePl={};  // kraj -> liczba nagrań (przybliżone, tylko gdy poza Polską)
+  var totalPts=0;
+
+  Object.keys(histMarkers).forEach(function(k){
+    var m=histMarkers[k];
+    if(m._avail)return;
+    var ll=m.getLatLng?m.getLatLng():null;
+    if(!ll)return;
+    var cat=m._cat||'';
+    var pts=pointsForCat(cat);
+    var voiv=getVoivodeship(ll.lat,ll.lng);
+    if(voiv){
+      voivPoints[voiv]=(voivPoints[voiv]||0)+pts;
+      voivCounts[voiv]=(voivCounts[voiv]||0)+1;
+      totalPts+=pts;
+    }else{
+      // Poza Polską — spróbuj przybliżyć region (bez wywołania API, tylko zgrubny opis współrzędnych)
+      var key=Math.round(ll.lat)+','+Math.round(ll.lng);
+      outsidePl[key]=(outsidePl[key]||0)+1;
+    }
+  });
+
+  document.getElementById('polandTotalPts').textContent='Łączne punkty odwagi: '+totalPts+' • '+Object.values(voivCounts).reduce(function(a,b){return a+b;},0)+' nagrań w Polsce';
+
+  var maxPts=Math.max.apply(null,Object.values(voivPoints).concat([1]));
+
+  var gridEl=document.getElementById('polandGrid');
+  gridEl.innerHTML=VOIVODESHIP_GRID.map(function(name){
+    if(!name)return '<div></div>';
+    var pts=voivPoints[name]||0;
+    var cnt=voivCounts[name]||0;
+    var t=pts/maxPts;
+    var col=intensityColor(pts>0?Math.max(0.1,t):0);
+    var textCol=t>0.5?'#fff':'#1A1A1A';
+    return '<div style="background:'+col+';border-radius:8px;padding:8px 6px;text-align:center;min-height:64px;display:flex;flex-direction:column;justify-content:center;transition:background .3s">'+
+      '<div style="font-size:9px;font-weight:700;color:'+textCol+';line-height:1.2">'+name+'</div>'+
+      '<div style="font-size:15px;font-weight:900;color:'+textCol+'">'+pts+'</div>'+
+      '<div style="font-size:8px;color:'+textCol+';opacity:.8">'+cnt+' nagr.</div>'+
+      '</div>';
+  }).join('');
+
+  // Sekcja "Poza Polską" — uproszczona, tylko zliczenie (bez wywoływania Nominatim dla każdego punktu)
+  var outsideKeys=Object.keys(outsidePl);
+  var outsideEl=document.getElementById('outsidePolandBox');
+  if(outsideKeys.length===0){
+    outsideEl.innerHTML='';
+  }else{
+    var totalOutside=Object.values(outsidePl).reduce(function(a,b){return a+b;},0);
+    outsideEl.innerHTML='<div style="font-size:13px;font-weight:700;color:#1A1A1A;margin-bottom:8px">🌍 Poza Polską ('+totalOutside+' nagrań)</div>'+
+      '<div style="font-size:11px;color:#888880">Kursanci nagrywali też poza granicami kraju — szczegóły widoczne po kliknięciu punktu na mapie głównej.</div>';
+  }
+}
+
+var CAT_COLOR={
+  'Sklepy':'#2e7d32','Przechodzień':'#6a1b9a','Monolog / Czytanie':'#0277bd',
+  'Telefon rodzina/znajomi':'#e65100','Telefon do miasta':'#bf360c',
+  'Wystąpienie':'#4a148c','Praca / Szkoła':'#1b5e20','Rodzina':'#880e4f',
+  'Przyjaciele':'#006064','W grupie':'#33691e','Restauracja Kelner':'#f57f17',
+  'McDrive, DriveThru':'#e65100','Miasto - inne':'#37474f','Zerówka':'#4e342e',
+  'Special':'#ad1457','Phone do Kursanta/Trenera':'#283593'
+};
+function catColor(cat){return CAT_COLOR[cat]||'#1a73e8';}
+
+function makeCircle(lat,lon,cat,isLive,isNew){
+  var c=catColor(cat);
+  // Sklepy i Przechodzień zawsze trochę większe — łatwiej widoczne
+  var isKey=['Sklepy','Przechodzień'].includes(cat);
+  return L.circleMarker([+lat,+lon],{
+    radius:isLive?13:(isKey?9:7),
+    fillColor:c,
+    color:'#ffffff',
+    weight:isLive?2.5:2,
+    fillOpacity:isLive?1:0.85,
+    className:'map-marker-shadow'+(isLive?' marker-live':'')+(isNew?' marker-new':'')
+  });
+}
+
+function makeAvailMarker(lat,lon){
+  var icon=L.divIcon({html:'<div style="width:28px;height:28px;background:#e53935;border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.3)">📞</div>',iconSize:[28,28],iconAnchor:[14,14],className:''});
+  return L.marker([+lat,+lon],{icon,zIndex:500});
+}
+
+function popup(name,cat,city,ts,isLive,phone,sys){
+  var age='';
+  if(isLive){var s=Math.floor((Date.now()-new Date(ts))/1000);age=' · '+(s<60?s+'s':Math.floor(s/60)+'min')+' temu';}
+  var nameWithCity=city?esc(name)+' <span style="font-weight:400;color:#888">('+esc(city)+')</span>':esc(name);
+  var sysStr=sys?'<div class="pcity">🎯 '+esc(sys)+'</div>':'';
+  var phoneStr=phone?'<div class="pphone">📞 <a href="tel:'+esc(phone)+'" style="color:#C47000;text-decoration:none">'+esc(phone)+'</a></div>':'';
+  return '<div class="pw"><b>'+nameWithCity+'</b>'+'<div class="pc">'+esc(cat)+'</div>'+sysStr+'<div class="pt">'+esc(ts)+age+'</div>'+'<div class="pp">'+(isLive?'🟢 nagrywa teraz':'📍 historyczne')+'</div>'+phoneStr+'</div>';
+}
+
+function availPopup(name,city,phone){
+  var phoneStr=phone?'<div class="pphone">📞 <a href="tel:'+esc(phone)+'" style="color:#C47000;text-decoration:none">'+esc(phone)+'</a></div>':'<div style="font-size:11px;color:#888880880;margin-top:6px">Numer nie udostępniony</div>';
+  return '<div class="pw"><b>'+esc(name)+'</b><div class="pc">🟢 Chętnie porozmawiam</div>'+(city?'<div class="pcity">📍 '+esc(city)+'</div>':'')+phoneStr+'</div>';
+}
+
+// ── REVERSE GEOCODING ──────────────────────────────────────────────
+async function getCity(lat,lon){
+  var key=Math.round(lat*100)+','+Math.round(lon*100); // ~1km precision
+  if(geocodeCache[key])return geocodeCache[key];
+  try{
+    var r=await fetch('https://nominatim.openstreetmap.org/reverse?lat='+lat+'&lon='+lon+'&format=json&accept-language=pl',
+      {headers:{'User-Agent':'PitchRec/1.0'}});
+    var d=await r.json();
+    var addr=d.address||{};
+    var city=addr.city||addr.town||addr.village||addr.county||'';
+    var state=addr.state||'';
+    var result=city+(state&&state!==city?' · '+state.replace(' Voivodeship','').replace(' Province',''):'');
+    geocodeCache[key]=result;
+    return result;
+  }catch(e){return '';}
+}
+
+// ── TOAST ──────────────────────────────────────────────────────────
+function showToast(name,cat,city,type){
+  var box=document.getElementById('toastBox');
+  var t=document.createElement('div');
+  t.className='toast';
+  var isAvail=type==='avail';
+  var icon=isAvail?'📞':cat==='Sklepy'?'🏪':cat==='Przechodzień'?'🚶':cat.includes('Telefon')?'📱':cat.includes('Monolog')?'🎤':cat==='Rodzina'?'👨‍👩‍👧':'🗣';
+  var nameColor=isAvail?'#ff6b6b':'#00e5a0';
+  t.innerHTML='<div class="toast-icon">'+icon+'</div>'+
+    '<div class="toast-body">'+
+    '<div class="toast-name" style="color:'+nameColor+'">'+esc(name)+'</div>'+
+    '<div class="toast-detail">'+esc(cat)+(city?' · '+esc(city):'')+'</div>'+
+    '</div>';
+  box.appendChild(t);
+  setTimeout(function(){t.style.transition='opacity .4s';t.style.opacity='0';setTimeout(function(){if(t.parentNode)t.parentNode.removeChild(t);},400);},7000);
+}
+
+// ── GPS ────────────────────────────────────────────────────────────
+var myLat=null,myLon=null;
+if(navigator.geolocation){
+  navigator.geolocation.watchPosition(function(pos){
+    myLat=pos.coords.latitude;myLon=pos.coords.longitude;
+    var ll=[myLat,myLon];
+    if(!myMarker){
+      myMarker=L.circleMarker(ll,{radius:10,fillColor:'#ffb300',color:'#fff',weight:2.5,fillOpacity:1,zIndexOffset:9999});
+      myMarker.bindPopup('<b>Twoja lokalizacja</b>');
+      myMarker.addTo(map);
+      map.setView(ll,15); // 2km widok przy pierwszym GPS
+    } else {
+      myMarker.setLatLng(ll);
+      // Nie resetuj widoku przy kolejnych aktualizacjach GPS
+    }
+  },function(){},{enableHighAccuracy:true,timeout:8000,maximumAge:5000});
+}
+
+// ── HIST DATA ──────────────────────────────────────────────────────
+// Filtrowanie po zoom — zdefiniowane przed HIST_DATA
+var OUTDOOR_CATS_MAP=['Sklepy','Przechodzień','Miasto - inne']; // przy bliskim zoom te trzy
+var ZOOM_THRESHOLD=14;
+var activeCategoryFilter=null; // null = pokaż wszystkie, albo nazwa jednej kategorii
+
+// Kategorie chronione prywatnością — Monolog/Czytanie i Rodzina (f2f) widoczne TYLKO przy
+// dużym oddaleniu mapy (widok rzędu ~200km), żeby nie dało się przybliżyć i namierzyć
+// dokładnego adresu (np. domu rodziny). To ograniczenie ZOOMU, nie odległości od widza —
+// obowiązuje niezależnie od tego gdzie akurat jest GPS osoby patrzącej na mapę.
+var PRIVACY_LIMITED_CATS=['Monolog / Czytanie','Rodzina'];
+var PRIVACY_MAX_ZOOM=9; // ok. widok ~200km szerokości — powyżej tego zoomu (bliżej) się chowają
+
+var showOnlyMine=localStorage.getItem('pitchrec_map_only_mine')==='1';
+
+function myOwnName(){
+  return localStorage.getItem('pitchrec_map_name')||localStorage.getItem('ns_email')||'';
+}
+// cat/zoom jak dotychczas; lat/lon/name/mine opcjonalne — jeśli podane, dokłada filtr
+// "tylko moje punkty". lat/lon zostawione w sygnaturze na potrzeby ew. przyszłych filtrów.
+function isVisibleAtZoom(cat,zoom,lat,lon,name,mine){
+  if(showOnlyMine){
+    var isMine=mine||(name&&name===myOwnName());
+    if(!isMine)return false;
+  }
+  if(PRIVACY_LIMITED_CATS.includes(cat)&&zoom>PRIVACY_MAX_ZOOM)return false;
+  if(activeCategoryFilter) return cat===activeCategoryFilter; // filtr aktywny — pokaż TYLKO wybraną kategorię, niezależnie od zoom
+  if(zoom<ZOOM_THRESHOLD)return true;
+  return OUTDOOR_CATS_MAP.includes(cat);
+}
+
+function toggleCatFilterPanel(){
+  var p=document.getElementById('catFilterPanel');
+  var show=p.style.display==='none';
+  p.style.display=show?'block':'none';
+  if(show){
+    renderCatFilterChips();
+    var cb=document.getElementById('onlyMineCheckbox');
+    if(cb)cb.checked=showOnlyMine;
+  }
+}
+function toggleOnlyMine(){
+  showOnlyMine=document.getElementById('onlyMineCheckbox').checked;
+  localStorage.setItem('pitchrec_map_only_mine',showOnlyMine?'1':'0');
+  updateMarkerVisibility();
+}
+
+function renderCatFilterChips(){
+  var wrap=document.getElementById('catFilterChips');
+  wrap.innerHTML=Object.keys(CAT_COLOR).map(function(cat){
+    var on=activeCategoryFilter===cat;
+    return '<button onclick="setCatFilter(\''+cat.replace(/'/g,"\\'")+'\')" style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:20px;border:1.5px solid '+(on?CAT_COLOR[cat]:'#ddd')+';background:'+(on?CAT_COLOR[cat]+'15':'#fff')+';cursor:pointer;font-size:11px;font-weight:600;color:#333">'+
+      '<span style="width:10px;height:10px;border-radius:50%;background:'+CAT_COLOR[cat]+';display:inline-block"></span>'+cat+'</button>';
+  }).join('');
+}
+
+function setCatFilter(cat){
+  activeCategoryFilter=(activeCategoryFilter===cat)?null:cat; // kliknięcie tej samej kategorii wyłącza filtr
+  updateMarkerVisibility();
+  renderCatFilterChips();
+  var btn=document.getElementById('btnCatFilter');
+  if(activeCategoryFilter){
+    btn.style.background=CAT_COLOR[activeCategoryFilter]+'20';
+    btn.style.borderColor=CAT_COLOR[activeCategoryFilter];
+    btn.textContent='🎨 '+activeCategoryFilter;
+  }else{
+    btn.style.background='#fff';
+    btn.style.borderColor='#ddd';
+    btn.textContent='🎨 Kategorie';
+  }
+}
+
+function clearCatFilter(){
+  activeCategoryFilter=null;
+  updateMarkerVisibility();
+  renderCatFilterChips();
+  var btn=document.getElementById('btnCatFilter');
+  btn.style.background='#fff';
+  btn.style.borderColor='#ddd';
+  btn.textContent='🎨 Kategorie';
+  document.getElementById('catFilterPanel').style.display='none';
+}
+
+HIST_DATA.forEach(function(p){
+  var k='h:'+p.n+':'+p.c+':'+p.la+':'+p.lo;
+  if(histMarkers[k])return;
+  var m=makeCircle(p.la,p.lo,p.c,false);
+  m.bindPopup(popup(p.n,p.c,'',p.ts,false,null,p.sys));
+  m._cat=p.c; m._lat=p.la; m._lon=p.lo; m._name=p.n; // dla filtrowania po zoom/odległości/właścicielu
+  if(isVisibleAtZoom(p.c, map.getZoom(), p.la, p.lo, p.n)) m.addTo(map);
+  histMarkers[k]=m;
+});
+
+// ── WŁASNE PUNKTY — natychmiastowa widoczność, niezależna od synchronizacji z serwerem ──
+// Kursant widzi swój punkt na mapie od razu po nagraniu, zanim jeszcze serwer/inni to zobaczą
+function renderMyOwnPoints(){
+  var myPts=[];
+  try{myPts=JSON.parse(localStorage.getItem('pitchrec_my_points')||'[]');}catch(e){}
+  myPts.forEach(function(p){
+    var k='my:'+p.name+':'+p.cat+':'+p.lat+':'+p.lon;
+    if(histMarkers[k])return; // już narysowany (np. przyszedł też z serwera)
+    var m=makeCircle(p.lat,p.lon,p.cat,false);
+    m.bindPopup(popup(p.name+' (Ty)',p.cat,'',new Date(p.ts).toLocaleString('pl-PL'),false,null,p.sys));
+    m._cat=p.cat;
+    m._lat=p.lat; m._lon=p.lon; m._name=p.name;
+    m._mine=true;
+    if(isVisibleAtZoom(p.cat,map.getZoom(),p.lat,p.lon,p.name,true))m.addTo(map);
+    histMarkers[k]=m;
+  });
+}
+renderMyOwnPoints();
+
+// ── LOAD LIVE ──────────────────────────────────────────────────────
+// ── WŁASNE LOKALNE PUNKTY (jeszcze niewysłane na serwer) ──────────
+// Renderuj OD RAZU z localStorage — kursant widzi swoje punkty natychmiast,
+// niezależnie od tego czy serwer już je zsynchronizował (batch co godzinę)
+function renderLocalPendingPoints(){
+  var q=[];
+  try{q=JSON.parse(localStorage.getItem('pitchrec_hist_batch')||'[]');}catch(e){return;}
+  if(!q.length)return;
+  q.forEach(function(p){
+    if(!p.lat||!p.lon||!p.cat||!p.name)return;
+    var k='local:'+p.name+':'+p.cat+':'+p.lat+':'+p.lon;
+    if(histMarkers[k])return; // już narysowany
+    var m=makeCircle(p.lat,p.lon,p.cat,false);
+    m.bindPopup(popup(p.name,p.cat,p.city||'',new Date(p.ts).toLocaleString('pl-PL'),false,null,p.sys)+
+      '<div style="font-size:9px;color:#c47800;margin-top:4px">⏳ oczekuje na synchronizację</div>');
+    m._cat=p.cat;
+    m._lat=p.lat; m._lon=p.lon; m._name=p.name;
+    m._pending=true;
+    m._mine=true; // punkty oczekujące na sync są zawsze WŁASNE (to nagranie tego kursanta)
+    if(isVisibleAtZoom(p.cat, map.getZoom(), p.lat, p.lon, p.name, true)) m.addTo(map);
+    histMarkers[k]=m;
+  });
+}
+
+async function loadLive(){
+  try{
+    var _tok=localStorage.getItem('ns_jwt');
+    var _email=localStorage.getItem('ns_email')||'';
+    var r=await fetch(NS_BASE+'/map/points',{cache:'no-store',headers: _tok?{'Authorization':'Token token='+_tok,'Email':_email}:{}});
+    if(r.status===401){
+      // Serwer odrzucił — prawdziwa weryfikacja, nie tylko sprawdzenie w JS klienta.
+      // To odróżniamy od "nigdy nie zalogowany" (sprawdzane na starcie strony) — tu
+      // token BYŁ ważny (mapa się załadowała), ale wygasł W TRAKCIE używania. Inny,
+      // jaśniejszy komunikat, żeby nie mylić z "nigdy się nie logowałeś".
+      var ag=document.getElementById('authGate');
+      var titleEl=document.getElementById('authGateTitle'),descEl=document.getElementById('authGateDesc');
+      if(titleEl)titleEl.textContent='Nie udało się zweryfikować logowania';
+      if(descEl)descEl.textContent='Coś przerwało sprawdzenie Twojego logowania podczas korzystania z mapy. Spróbuj zalogować się ponownie — jeśli to się powtarza, daj znać.';
+      ag.style.display='flex';
+      document.documentElement.style.overflow='hidden';
+      clearInterval(_liveInterval);
+      return;
+    }
+    var d=await r.json();
+    var live=d.live||[],hist=d.history||[],avail=d.available||[];
+
+    // Nowe live punkty → toast (tylko przy kolejnych odświeżeniach, nie przy starcie)
+    for(var i=0;i<live.length;i++){
+      var p=live[i];
+      var lk=p.name+':'+p.cat+':'+p.lat+':'+p.lon;
+      if(!knownLiveKeys.has(lk)){
+        knownLiveKeys.add(lk);
+        // Pokaż toast gdy punkt jest świeży (nagrany po otwarciu mapy LUB ostatnie 90s)
+        var isFresh=p.ts>mapOpenedAt||(Date.now()-p.ts)<90000;
+        if(isFresh){
+          (async function(pp){
+            var city=pp.city||(pp.lat?await getCity(pp.lat,pp.lon):'');
+            showToast(pp.name,pp.cat,city,'live');
+            var mk=liveMarkers[pp.name+':'+pp.cat];
+            if(mk)mk.setPopupContent(popup(pp.name,pp.cat,city,new Date(pp.ts).toLocaleString('pl-PL'),true,null));
+          })(p);
+        }
+      }
+    }
+
+    for(var j=0;j<avail.length;j++){
+      var av=avail[j];
+      if(!knownAvailKeys.has(av.name)){
+        knownAvailKeys.add(av.name);
+        var availFresh=av.ts>mapOpenedAt||(Date.now()-av.ts)<90000;
+        if(availFresh) showToast(av.name,'Chętnie porozmawiam',av.city||'','avail');
+      }
+    }
+    // Usuń nieaktualnych dostępnych
+    var newAK=new Set(avail.map(function(p){return p.name;}));
+    knownAvailKeys.forEach(function(k){if(!newAK.has(k))knownAvailKeys.delete(k);});
+
+    // Usuń stare live markery
+    var newLK=new Set(live.map(function(p){return p.name+':'+p.cat;}));
+    Object.keys(liveMarkers).forEach(function(k){
+      if(!newLK.has(k)){liveMarkers[k].remove();delete liveMarkers[k];}
+    });
+    knownLiveKeys.forEach(function(k){
+      var parts=k.split(':');var namecat=parts[0]+':'+parts[1];
+      if(!newLK.has(namecat))knownLiveKeys.delete(k);
+    });
+
+    // Dodaj/aktualizuj live markery
+    live.forEach(function(p){
+      var k=p.name+':'+p.cat;
+      var ts=new Date(p.ts).toLocaleString('pl-PL');
+      if(liveMarkers[k]){liveMarkers[k].setLatLng([p.lat,p.lon]);}
+      else{
+        var m=makeCircle(p.lat,p.lon,p.cat,true);
+        m.bindPopup(popup(p.name,p.cat,p.city||'',ts,true,null,p.sys));
+        m.addTo(map);
+        liveMarkers[k]=m;
+      }
+    });
+
+    // Historyczne z Firebase
+    hist.forEach(function(p){
+      var k='k:'+p.name+':'+p.cat+':'+p.lat+':'+p.lon;
+      if(!histMarkers[k]){
+        var m=makeCircle(p.lat,p.lon,p.cat,false,!firstLoad);
+        m.bindPopup(popup(p.name,p.cat,p.city||'',new Date(p.ts).toLocaleString('pl-PL'),false,null,p.sys));
+        m._cat=p.cat;
+        m._lat=p.lat; m._lon=p.lon; m._name=p.name;
+        if(isVisibleAtZoom(p.cat, map.getZoom(), p.lat, p.lon, p.name)) m.addTo(map);
+        histMarkers[k]=m;
+      }
+    });
+
+    // Dostępni — markery
+    var newAKm=new Set(avail.map(function(p){return p.name;}));
+    Object.keys(availMarkers).forEach(function(k){
+      if(!newAKm.has(k)){availMarkers[k].remove();delete availMarkers[k];}
+    });
+    avail.forEach(function(p){
+      if(!availMarkers[p.name]){
+        if(p.lat&&p.lon){
+          var m=makeAvailMarker(p.lat,p.lon);
+          m.bindPopup(availPopup(p.name,p.city||'',p.phone));
+          m._avail=p;
+          m.addTo(map);
+          availMarkers[p.name]=m;
+        } else {
+          // Brak GPS — tylko w liście, bez znacznika na mapie
+          availMarkers[p.name]={_avail:p,remove:function(){}};
+        }
+      }
+    });
+
+    // Aktualizuj UI
+    var availCount=avail.length;
+    var panel=document.getElementById('availPanel');
+    panel.style.display=availCount>0?'block':'none';
+    document.getElementById('availCount').textContent=availCount;
+    document.getElementById('liveDot').style.display=live.length?'block':'none';
+    var total=Object.keys(histMarkers).length+live.length;
+    document.getElementById('cntBadge').textContent=total+' miejsc'+(live.length?' · '+live.length+' live':'')+(availCount?' · '+availCount+' 📞':'');
+    document.getElementById('statusTxt').textContent='Odśw. '+new Date().toLocaleTimeString('pl-PL')+(live.length?' · '+live.length+' nagrywa teraz':'');
+    firstLoad=false;
+  }catch(e){
+    document.getElementById('statusTxt').textContent='Błąd połączenia';
+  }
+}
+
+function focusAvail(){
+  var keys=Object.keys(availMarkers);
+  // Pokaż panel z listą dostępnych
+  var existing=document.getElementById('availListPanel');
+  if(existing){existing.remove();return;}
+  var avails=Object.values(availMarkers).map(function(m){return m._avail;}).filter(Boolean);
+  if(!avails.length)return;
+  var panel=document.createElement('div');
+  panel.id='availListPanel';
+  panel.style.cssText='position:absolute;top:44px;left:8px;z-index:2000;background:rgba(255,255,255,.96);border-radius:12px;padding:10px 12px;min-width:200px;max-width:260px;box-shadow:0 4px 20px rgba(0,0,0,.2)';
+  var html='<div style="font-size:10px;font-weight:700;color:#1A1A1A;margin-bottom:8px;letter-spacing:.5px">📞 DOSTĘPNI DO ROZMOWY</div>';
+  avails.forEach(function(a){
+    html+='<div style="padding:6px 0;border-bottom:1px solid #f0f0f0">';
+    html+='<div style="font-size:13px;font-weight:700;color:#e53935">'+esc(a.name)+'</div>';
+    if(a.city)html+='<div style="font-size:10px;color:#888880880;margin-top:1px">📍 '+esc(a.city)+'</div>';
+    if(a.phone)html+='<div style="margin-top:4px"><a href="tel:'+esc(a.phone)+'" style="font-size:12px;font-weight:700;color:#C47000;text-decoration:none;background:#FFF5E8;padding:3px 8px;border-radius:6px">📞 '+esc(a.phone)+'</a></div>';
+    else html+='<div style="font-size:10px;color:#bbb;margin-top:2px">Brak numeru</div>';
+    html+='</div>';
+  });
+  html+='<div onclick="document.getElementById(\'availListPanel\').remove()" style="text-align:center;margin-top:8px;font-size:11px;color:#888880880;cursor:pointer">Zamknij ×</div>';
+  panel.innerHTML=html;
+  document.getElementById('mapwrap').appendChild(panel);
+}
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// ── MAPA CIEPLNA ──────────────────────────────────────────────────
+var heatmapLayer = null;
+var heatmapOn = false;
+
+function toggleHeatmap(){
+  heatmapOn = !heatmapOn;
+  var btn = document.getElementById('btnHeat');
+  if(heatmapOn){
+    btn.style.borderColor = '#e53935';
+    btn.style.color = '#e53935';
+    btn.style.background = 'rgba(229,57,53,.1)';
+    renderHeatmap();
+  } else {
+    btn.style.borderColor = 'rgba(229,57,53,.4)';
+    btn.style.color = '#888';
+    btn.style.background = '';
+    if(heatmapLayer){map.removeLayer(heatmapLayer);heatmapLayer=null;}
+  }
+}
+
+function renderHeatmap(){
+  if(heatmapLayer){map.removeLayer(heatmapLayer);heatmapLayer=null;}
+  // Zbierz punkty TYLKO z histMarkers — to już zawiera WSZYSTKO (HIST_DATA + Firebase),
+  // wcześniej HIST_DATA był dodawany osobno co PODWAJAŁO te punkty na mapie cieplnej
+  var points = [];
+  Object.values(histMarkers).forEach(function(m){
+    if(m._avail)return; // pomiń markery dostępności
+    var ll = m.getLatLng ? m.getLatLng() : null;
+    if(ll) points.push([ll.lat, ll.lng]);
+  });
+
+  if(!points.length) return;
+
+  var heatGroup = L.layerGroup();
+  var cellSize = 0.0025; // ~250m (było 500m) — drobniejsza siatka, więcej widocznych "gorących" miejsc
+  var cells = {};
+  points.forEach(function(p){
+    var cy = Math.round(p[0]/cellSize)*cellSize;
+    var cx = Math.round(p[1]/cellSize)*cellSize;
+    var key = cy.toFixed(4)+':'+cx.toFixed(4);
+    cells[key] = (cells[key]||0) + 1;
+    if(!cells[key+'_pos']) cells[key+'_pos'] = [cy,cx];
+  });
+  var maxVal = Math.max.apply(null, Object.values(cells).filter(function(v){return typeof v==='number';}));
+  Object.keys(cells).forEach(function(k){
+    if(k.endsWith('_pos'))return;
+    var pos = cells[k+'_pos'];
+    if(!pos)return;
+    var intensity = cells[k]/maxVal;
+    // Mocniejszy, bardziej widoczny gradient: nawet pojedynczy punkt ma widoczną plamę
+    var alpha = Math.min(0.75, 0.25 + intensity * 0.5);
+    var r = 255;
+    var g = Math.round(220*(1-intensity));
+    var b = 0;
+    L.circleMarker(pos, {
+      radius: Math.max(12, 28*intensity),
+      fillColor: 'rgb('+r+','+g+','+b+')',
+      fillOpacity: alpha,
+      color: 'transparent',
+      weight: 0,
+      interactive: false
+    }).addTo(heatGroup);
+  });
+  heatmapLayer = heatGroup;
+  heatGroup.addTo(map);
+}
+
+function updateMarkerVisibility(){
+  var z = map.getZoom();
+  // Historyczne markery
+  Object.keys(histMarkers).forEach(function(k){
+    var m = histMarkers[k];
+    var cat = m._cat || '';
+    if(isVisibleAtZoom(cat, z, m._lat, m._lon, m._name, m._mine)){
+      if(!map.hasLayer(m)) m.addTo(map);
+    } else {
+      if(map.hasLayer(m)) map.removeLayer(m);
+    }
+  });
+  // Live markery — też respektują filtr kategorii (ale nie zoom-threshold outdoor, tylko privacy-zoom)
+  Object.keys(liveMarkers).forEach(function(k){
+    var m = liveMarkers[k];
+    var cat = k.split(':')[1] || '';
+    var name = k.split(':')[0] || '';
+    var visible = activeCategoryFilter ? (cat===activeCategoryFilter) : true;
+    if(visible && showOnlyMine && name!==myOwnName()) visible=false;
+    if(visible && PRIVACY_LIMITED_CATS.includes(cat) && z>PRIVACY_MAX_ZOOM) visible=false;
+    if(visible){
+      if(!map.hasLayer(m)) m.addTo(map);
+    } else {
+      if(map.hasLayer(m)) map.removeLayer(m);
+    }
+  });
+}
+
+map.on('zoomend', updateMarkerVisibility);
+map.on('load', updateMarkerVisibility);
+// Wywołaj też po 500ms (gdy markery już załadowane)
+setTimeout(updateMarkerVisibility, 500);
+
+renderLocalPendingPoints(); // od razu, bez czekania na sieć
+loadLive();
+var _liveInterval = setInterval(loadLive, 30000); // 30s zamiast 15s
+
+// Jeśli otwarto z parametrami lat/lon (np. z panelu trenera, "Pokaż na mapie" przy nagraniu),
+// wyśrodkuj mapę na tym punkcie i pokaż wyraźny, tymczasowy znacznik.
+(function(){
+  var params = new URLSearchParams(window.location.search);
+  var hlLat = parseFloat(params.get('lat'));
+  var hlLon = parseFloat(params.get('lon'));
+  var hlName = params.get('name') || '';
+  if(!isNaN(hlLat) && !isNaN(hlLon)){
+    setTimeout(function(){
+      map.flyTo([hlLat, hlLon], 16, {duration: 1});
+      var hlMarker = L.circleMarker([hlLat, hlLon], {
+        radius: 14, color: '#ff2d2d', fillColor: '#ff2d2d', fillOpacity: 0.35, weight: 3
+      }).addTo(map);
+      hlMarker.bindPopup('<div class="pw"><b>📍 '+esc(hlName)+'</b><div class="pc">Wskazany punkt</div></div>').openPopup();
+      // Delikatna pulsacja żeby przyciągnąć wzrok
+      var pulseCount = 0;
+      var pulseInterval = setInterval(function(){
+        hlMarker.setRadius(pulseCount%2===0 ? 20 : 14);
+        pulseCount++;
+        if(pulseCount>6) clearInterval(pulseInterval);
+      }, 400);
+    }, 800); // poczekaj aż mapa się zainicjuje
+  }
+})();
+
+// Zatrzymaj odpytywanie gdy karta w tle — oszczędza limit Workera
+document.addEventListener('visibilitychange', function(){
+  if(document.hidden){
+    if(_liveInterval){clearInterval(_liveInterval);_liveInterval=null;}
+  } else {
+    if(!_liveInterval){
+      loadLive(); // odśwież od razu po powrocie
+      _liveInterval = setInterval(loadLive, 30000);
+    }
+  }
+});
+
+// Przycisk dostępności na mapie
+var _mapAvail = localStorage.getItem('pitchrec_map_avail') === '1';
+function updateMapAvailBtn(){
+  var btn=document.getElementById('mapAvailBtn');
+  if(!btn)return;
+  if(_mapAvail){
+    btn.textContent='📞 Dostępny';
+    btn.style.background='rgba(229,57,53,.12)';
+    btn.style.borderColor='#e53935';
+    btn.style.color='#e53935';
+    btn.style.fontWeight='700';
+    btn.style.opacity='1';
+  }else{
+    btn.textContent='📞 Niedostępny';
+    btn.style.background='rgba(255,255,255,.85)';
+    btn.style.borderColor='rgba(0,0,0,.15)';
+    btn.style.color='#999';
+    btn.style.fontWeight='400';
+    btn.style.opacity='0.8';
+  }
+}
+async function toggleMapAvail(){
+  _mapAvail = !_mapAvail;
+  localStorage.setItem('pitchrec_map_avail', _mapAvail ? '1' : '0');
+  updateMapAvailBtn();
+  var name = localStorage.getItem('pitchrec_map_name') || localStorage.getItem('ns_email') || 'Kursant';
+  var phone = localStorage.getItem('pitchrec_map_phone') || '';
+  var userId = localStorage.getItem('ns_user_id') || name;
+  var city = localStorage.getItem('ns_city') || '';
+  try {
+    await fetch(NS_BASE + '/map/avail', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({userId, name, phone: phone||null, available: _mapAvail, city})
+    });
+  } catch(e) {}
+}
+updateMapAvailBtn();
+
+// TEST: pokaż toast po 3s żeby sprawdzić mechanizm (usuń po potwierdzeniu)
+setTimeout(function(){
+  showToast('Test','Sklepy · mechanizm działa','Bytom','live');
+},3000);
+</script>
+</body>
+</html>

@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="color-scheme" content="light only">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#f5f5f7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>PitchRec — Ustawienia</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+:root{--bg:#f5f5f7;--card:#ffffff;--c2:#f0f0f4;--bd:#d0d0dc;--acc:#00875a;--pur:#5b4ed4;--warn:#d93025;--pau:#c47800;--tx:#1a1a2e;--mu:#666680}
+html,body{height:100%;background:var(--bg);color:var(--tx);font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+body{display:flex;flex-direction:column;height:100dvh}
+.top{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:env(safe-area-inset-top,5px) 14px 8px;background:var(--card);border-bottom:1px solid var(--bd)}
+.back{font-size:11px;font-family:'Courier New',monospace;color:var(--mu);background:none;border:none;cursor:pointer}
+.title{font-size:10px;font-weight:700;letter-spacing:2px;color:var(--pur);font-family:'Courier New',monospace}
+.lang-btn{padding:3px 7px;border-radius:5px;border:1px solid var(--bd);background:transparent;color:var(--mu);font-size:10px;font-weight:700;cursor:pointer;touch-action:manipulation}.lang-btn.on{background:var(--acc);color:#000;border-color:var(--acc)}
+.body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px}
+.ct{font-size:10px;font-family:'Courier New',monospace;letter-spacing:1px;color:var(--tx);font-weight:700;margin-bottom:10px}
+
+/* Calibration recording */
+.cal-btn{width:100%;padding:14px;border-radius:10px;border:2px solid var(--acc);background:rgba(0,229,160,.08);color:var(--acc);font-size:13px;font-weight:700;font-family:'Courier New',monospace;letter-spacing:1px;cursor:pointer;touch-action:manipulation;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:8px}
+.cal-btn.recording{background:rgba(255,80,80,.15);border-color:var(--warn);color:var(--warn);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.cal-waveform{width:100%;height:60px;background:#e4e4ec;border-radius:8px;margin:10px 0;overflow:hidden;position:relative}
+canvas#calCv{position:absolute;inset:0;width:100%;height:100%}
+.cal-result{background:var(--c2);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;margin-top:8px;display:none}
+.cal-result.show{display:block}
+.cal-result-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.cal-result-label{font-size:11px;font-family:'Courier New',monospace;color:var(--tx)}
+.cal-result-val{font-size:12px;font-weight:700;font-family:'Courier New',monospace;color:var(--acc)}
+.cal-apply-btn{width:100%;padding:10px;border-radius:8px;border:none;background:var(--acc);color:#000;font-size:12px;font-weight:700;font-family:'Courier New',monospace;letter-spacing:1px;cursor:pointer;touch-action:manipulation;margin-top:8px}
+
+/* Phase diagram */
+.phase-diagram{width:100%;height:80px;background:#eaeaf0;border-radius:8px;position:relative;overflow:hidden;margin-bottom:12px}
+canvas#phaseCv{position:absolute;inset:0;width:100%;height:100%}
+.phase-labels{display:flex;margin-top:4px}
+.pl{flex:1;text-align:center;font-size:10px;font-family:'Courier New',monospace;color:var(--tx);font-weight:600}
+
+/* Sliders */
+.srow{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.slbl{font-size:11px;font-family:'Courier New',monospace;color:var(--tx);width:44px;text-align:right;flex-shrink:0;font-weight:600}
+.sval{font-size:14px;font-weight:700;font-family:'Courier New',monospace;color:var(--tx);width:52px;flex-shrink:0}
+.st{flex:1;height:24px;display:flex;align-items:center;position:relative;cursor:pointer}
+.sb{width:100%;height:5px;background:var(--bd);border-radius:3px}
+.sf{height:100%;border-radius:3px;position:absolute;top:0;left:0;pointer-events:none}
+.sth{position:absolute;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;background:#fff;z-index:2;box-shadow:0 1px 6px rgba(0,0,0,.25);border:1.5px solid var(--bd)}
+#sf1{background:var(--pur)}#st1{box-shadow:0 0 0 3px rgba(139,126,255,.35)}
+#sf2{background:var(--acc)}#st2{box-shadow:0 0 0 3px rgba(0,229,160,.35)}
+#sf3{background:var(--pau)}#st3{box-shadow:0 0 0 3px rgba(255,184,48,.35)}
+#sfQ{background:var(--warn)}#stQ{box-shadow:0 0 0 3px rgba(255,80,80,.35)}
+#sfTol{background:#6cf}#stTol{box-shadow:0 0 0 3px rgba(100,200,255,.35)}
+
+/* Info boxes */
+.phase-row{display:flex;gap:8px;margin-bottom:6px}
+.ph-box{flex:1;padding:10px 8px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);text-align:center}
+.ph-num{font-size:18px;font-weight:700;font-family:'Courier New',monospace}
+.ph-name{font-size:10px;font-family:'Courier New',monospace;color:var(--tx);margin-top:2px;font-weight:600}
+
+.desc{font-size:11px;color:var(--mu);line-height:1.6}
+.save-btn{width:100%;padding:14px;border-radius:10px;border:none;background:var(--pur);color:#fff;font-size:13px;font-weight:700;font-family:'Courier New',monospace;letter-spacing:1px;cursor:pointer;transition:all .15s}
+.save-btn:active{transform:scale(.97)}
+.saved{text-align:center;font-size:11px;font-family:'Courier New',monospace;color:rgba(0,229,160,.7);padding:6px;opacity:0;transition:opacity .3s}
+</style>
+</head>
+<body>
+<div class="top">
+  <button class="back" id="backBtn" onclick="location.href='index.html'">← DAW</button>
+  <div class="title" id="pageTitle">USTAWIENIA NORM</div>
+  <div style="display:flex;gap:4px">
+    <button class="lang-btn" id="lPL" onclick="setLang('pl')">PL</button>
+    <button class="lang-btn" id="lEN" onclick="setLang('en')">EN</button>
+    <button class="lang-btn" id="lCS" onclick="setLang('cs')">CS</button>
+  </div>
+</div>
+<div class="body">
+
+  <!-- KALIBRACJA WZORCEM -->
+  <div class="card">
+    <div class="ct" id="ctCal">🔬 KALIBRACJA WZORCEM</div>
+    <div style="font-size:11px;color:var(--mu);line-height:1.6;margin-bottom:12px" id="calDesc">
+      Nagraj wzorcową emisję <b>3 razy</b> — kilka nagrań daje stabilniejszy, uśredniony wzorzec niż jedno. Apka automatycznie wyznaczy parametry 4 faz i "kształt" dźwięku.
+    </div>
+    <div id="calProgress" style="display:none;font-size:12px;color:var(--acc);font-weight:700;margin-bottom:8px;padding:8px;background:rgba(232,130,12,.1);border-radius:8px"></div>
+    <button class="cal-btn" id="calBtn" onclick="toggleCalRecording()">
+      <span id="calBtnIcon">⏺</span>
+      <span id="calBtnLbl">Nagraj wzorzec</span>
+    </button>
+    <button class="cal-btn" style="background:transparent;border:1px solid var(--mu);color:var(--mu);margin-top:6px;font-size:11px" onclick="resetCalTakes()">🔄 Zacznij od nowa (wyczyść zebrane nagrania)</button>
+    <div class="cal-waveform"><canvas id="calCv"></canvas></div>
+    <div class="cal-result" id="calResult">
+      <div class="cal-result-row"><span class="cal-result-label" id="calR1lbl">① Faza leniwa</span><span class="cal-result-val" id="calR1">—</span></div>
+      <div class="cal-result-row"><span class="cal-result-label" id="calR2lbl">② Narastanie</span><span class="cal-result-val" id="calR2">—</span></div>
+      <div class="cal-result-row"><span class="cal-result-label" id="calR3lbl">③ Plateau</span><span class="cal-result-val" id="calR3">—</span></div>
+      <div class="cal-result-row"><span class="cal-result-label" id="calR4lbl">④ Opadanie</span><span class="cal-result-val" id="calR4">—</span></div>
+      <div class="cal-result-row"><span class="cal-result-label" id="calR5lbl">Próg ciszy</span><span class="cal-result-val" id="calR5">—</span></div>
+      <div class="cal-result-row"><span class="cal-result-label" id="calR6lbl">Szczyt / cisza</span><span class="cal-result-val" id="calR6">—</span></div>
+      <button class="cal-apply-btn" id="calApplyBtn" onclick="applyCalibration()">
+        ✓ <span id="calApplyLbl">Przenieś na suwaki</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- DIAGRAM -->
+  <div class="card">
+    <div class="ct"><span id="ct1">WZORZEC 4 FAZ EMISJI</span></div>
+    <div class="phase-diagram"><canvas id="phaseCv"></canvas></div>
+    <div class="phase-labels">
+      <div class="pl" style="color:var(--pur)"><span id="ph1lbl">① LENIWA</span></div>
+      <div class="pl" style="color:var(--acc)"><span id="ph2lbl">② NARASTANIE</span></div>
+      <div class="pl" style="color:var(--acc)"><span id="ph3lbl">③ PLATEAU</span></div>
+      <div class="pl" style="color:var(--pau)"><span id="ph4lbl">④ OPADANIE</span></div>
+    </div>
+  </div>
+
+  <!-- SUWAKI -->
+  <div class="card">
+    <div class="ct"><span id="ct2">CZAS TRWANIA FAZ</span></div>
+    <div class="srow">
+      <span class="slbl" id="s1lbl">LENIWA</span>
+      <div class="st" id="s1t"><div class="sb"><div class="sf" id="sf1"></div></div><div class="sth" id="st1"></div></div>
+      <span class="sval" id="sv1">1.5s</span>
+    </div>
+    <div class="srow">
+      <span class="slbl" id="s2lbl">NARAS.</span>
+      <div class="st" id="s2t"><div class="sb"><div class="sf" id="sf2"></div></div><div class="sth" id="st2"></div></div>
+      <span class="sval" id="sv2">2.0s</span>
+    </div>
+    <div class="srow">
+      <span class="slbl" id="s3lbl">OPADANIE</span>
+      <div class="st" id="s3t"><div class="sb"><div class="sf" id="sf3"></div></div><div class="sth" id="st3"></div></div>
+      <span class="sval" id="sv3">0.9s</span>
+    </div>
+    <div class="phase-row" style="margin-top:8px">
+      <div class="ph-box">
+        <div class="ph-num" style="color:var(--pur)" id="pv1">1.5s</div>
+        <div class="ph-name" id="pn1">LENIWA</div>
+      </div>
+      <div class="ph-box">
+        <div class="ph-num" style="color:var(--acc)" id="pv2">2.0s</div>
+        <div class="ph-name" id="pn2">NARASTANIE</div>
+      </div>
+      <div class="ph-box">
+        <div class="ph-num" style="color:var(--pau)" id="pv3">0.9s</div>
+        <div class="ph-name" id="pn3">OPADANIE</div>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:8px;font-size:11px;font-family:'Courier New',monospace;color:var(--mu)">
+      <span id="totalLbl">ŁĄCZNY CZAS</span>: <span style="color:var(--tx)" id="totalTime">4.4s</span>
+      &nbsp;·&nbsp;
+      SZCZYT/CISZA: <span style="color:var(--acc)" id="pkRatioDisp">×5.0</span>
+    </div>
+  </div>
+
+  <!-- PRÓG CISZY -->
+  <div class="card">
+    <div class="ct"><span id="ct3">GŁOŚNOŚĆ FAZY LENIWEJ</span></div>
+    <div class="srow">
+      <span class="slbl" id="threshLbl">PRÓG</span>
+      <div class="st" id="sQt"><div class="sb"><div class="sf" id="sfQ"></div></div><div class="sth" id="stQ"></div></div>
+      <span class="sval" id="svQ">60%</span>
+    </div>
+    <div style="font-size:10px;font-family:'Courier New',monospace;color:var(--acc);margin-top:2px" id="qDesc">Łagodne</div>
+  </div>
+
+  <!-- TOLERANCJA -->
+  <div class="card">
+    <div class="ct"><span id="ct5">TOLERANCJA OCENY</span></div>
+    <div style="font-size:11px;color:var(--mu);line-height:1.6;margin-bottom:10px" id="tolDesc">
+      Margines odchylenia od wzorca — im wyższy, tym łatwiej kursant dostanie zielony wynik.
+    </div>
+    <div class="srow">
+      <span class="slbl" id="tolLbl">MARGINES</span>
+      <div class="st" id="sTol"><div class="sb"><div class="sf" id="sfTol"></div></div><div class="sth" id="stTol"></div></div>
+      <span class="sval" id="svTol">10%</span>
+    </div>
+    <div style="font-size:10px;font-family:'Courier New',monospace;color:var(--acc);margin-top:2px" id="tolDsc2">Standardowa</div>
+  </div>
+
+
+  <button class="save-btn" id="saveBtn"><span id="saveLbl">ZAPISZ I WRÓĆ DO DAW</span></button>
+  <div class="saved" id="saved">✓ Zapisano</div>
+</div>
+
+<script>
+'use strict';
+const TRAIN_LANGS={
+  pl:{
+    pageTitle:'USTAWIENIA NORM',backBtn:'← DAW',saveLbl:'ZAPISZ I WRÓĆ DO DAW',
+    ctCal:'🔬 KALIBRACJA WZORCEM',
+    calDesc:'Naciśnij i nagraj wzorcową emisję. Apka automatycznie wyznaczy parametry 4 faz i ustawi suwaki.',
+    ct1:'WZORZEC 4 FAZ EMISJI',ct2:'CZAS TRWANIA FAZ',ct3:'GŁOŚNOŚĆ FAZY LENIWEJ',ct5:'TOLERANCJA OCENY',
+    ph1lbl:'① LENIWA',ph2lbl:'② NARASTANIE',ph3lbl:'③ PLATEAU',ph4lbl:'④ OPADANIE',
+    s1lbl:'LENIWA',s2lbl:'NARAS.',s3lbl:'OPADANIE',
+    pn1:'LENIWA',pn2:'NARASTANIE',pn3:'OPADANIE',
+    totalLbl:'ŁĄCZNY CZAS',threshLbl:'PRÓG',tolLbl:'MARGINES',
+    tolDesc:'Margines odchylenia od wzorca — im wyższy, tym łatwiej kursant dostanie zielony wynik.',
+    calBtnLbl:'Nagraj wzorzec',calBtnRecLbl:'Zatrzymaj',
+    calR1lbl:'① Faza leniwa',calR2lbl:'② Narastanie',calR3lbl:'③ Plateau',calR4lbl:'④ Opadanie',calR5lbl:'Próg ciszy',
+    calApplyLbl:'Przenieś na suwaki',
+  },
+  en:{
+    pageTitle:'NORM SETTINGS',backBtn:'← DAW',saveLbl:'SAVE AND RETURN TO DAW',
+    ctCal:'🔬 PATTERN CALIBRATION',
+    calDesc:'Press and record a reference emission. The app will automatically determine the 4-phase parameters and set the sliders.',
+    ct1:'4-PHASE EMISSION PATTERN',ct2:'PHASE DURATION',ct3:'QUIET ENTRY THRESHOLD',ct5:'SCORING TOLERANCE',
+    ph1lbl:'① QUIET',ph2lbl:'② RISE',ph3lbl:'③ PLATEAU',ph4lbl:'④ FALL',
+    s1lbl:'QUIET',s2lbl:'RISE',s3lbl:'FALL',
+    pn1:'QUIET',pn2:'RISE',pn3:'FALL',
+    totalLbl:'TOTAL TIME',threshLbl:'THRESHOLD',tolLbl:'MARGIN',
+    tolDesc:'Deviation margin from pattern — higher = easier for student to get green result.',
+    calBtnLbl:'Record pattern',calBtnRecLbl:'Stop',
+    calR1lbl:'① Quiet phase',calR2lbl:'② Rise',calR3lbl:'③ Plateau',calR4lbl:'④ Fall',calR5lbl:'Quiet threshold',
+    calApplyLbl:'Apply to sliders',
+  },
+  cs:{
+    pageTitle:'NASTAVENÍ NOREM',backBtn:'← DAW',saveLbl:'ULOŽIT A VRÁTIT SE DO DAW',
+    ctCal:'🔬 KALIBRACE VZORCEM',
+    calDesc:'Stiskněte a nahrajte referenční emisi. Aplikace automaticky stanoví parametry 4 fází a nastaví posuvníky.',
+    ct1:'VZOREC 4 FÁZ EMISE',ct2:'DÉLKA FÁZ',ct3:'PRÁH TICHÉ FÁZE',ct5:'TOLERANCE HODNOCENÍ',
+    ph1lbl:'① TICHÁ',ph2lbl:'② NÁRŮST',ph3lbl:'③ PLATEAU',ph4lbl:'④ POKLES',
+    s1lbl:'TICHÁ',s2lbl:'NÁRŮST',s3lbl:'POKLES',
+    pn1:'TICHÁ',pn2:'NÁRŮST',pn3:'POKLES',
+    totalLbl:'CELKOVÝ ČAS',threshLbl:'PRÁH',tolLbl:'OKRAJ',
+    tolDesc:'Odchylka od vzorce — vyšší = snazší pro studenta získat zelený výsledek.',
+    calBtnLbl:'Nahrát vzorec',calBtnRecLbl:'Zastavit',
+    calR1lbl:'① Tichá fáze',calR2lbl:'② Nárůst',calR3lbl:'③ Plateau',calR4lbl:'④ Pokles',calR5lbl:'Práh ticha',
+    calApplyLbl:'Přenést na posuvníky',
+  }
+};
+var curTrainLang=localStorage.getItem('pitchrec_lang')||'pl';
+function tT(k){return(TRAIN_LANGS[curTrainLang]||TRAIN_LANGS.pl)[k]||k;}
+function setLang(l){
+  curTrainLang=l;localStorage.setItem('pitchrec_lang',l);
+  ['lPL','lEN','lCS'].forEach(function(id){document.getElementById(id).classList.toggle('on',id==='l'+l.toUpperCase());});
+  Object.keys(TRAIN_LANGS.pl).forEach(function(k){var el=document.getElementById(k);if(el)el.textContent=tT(k);});
+  if(!calRecording)document.getElementById('calBtnLbl').textContent=tT('calBtnLbl');
+}
+
+const DPR=Math.min(window.devicePixelRatio||1,2);
+let ph1=1.5, ph2=2.0, ph3=0.9;
+let quietThresh=0.6;
+let tolerance=0.10;
+let pkRatio=5.0; // domyślny stosunek szczyt/cisza (bez kalibracji)
+
+// Calibration state
+var calRecording=false, calAC=null, calStream=null, calProc=null, calBuf=[];
+
+// ══════════════════════════════════════════════════════════════
+// WEKTOR "KSZTAŁTU" — zamienia dowolne nagranie na stały wektor N punktów (znormalizowany
+// w czasie i amplitudzie), niezależnie od jego długości. Pozwala porównywać różne nagrania
+// (i uśredniać kilka wzorców) niezależnie od tego jak długo trwały / jak głośno były.
+// ══════════════════════════════════════════════════════════════
+function extractShapeVector(buf, numPoints){
+  numPoints = numPoints || 60;
+  var pk = 0; for(var i=0;i<buf.length;i++){var a=Math.abs(buf[i]); if(a>pk)pk=a;}
+  if(pk < 0.0001) return new Array(numPoints).fill(0);
+  var vec = [];
+  for(var i=0;i<numPoints;i++){
+    var pos = (i/(numPoints-1)) * (buf.length-1);
+    var idx0 = Math.floor(pos), idx1 = Math.min(buf.length-1, idx0+1);
+    var frac = pos - idx0;
+    var val = buf[idx0]*(1-frac) + buf[idx1]*frac;
+    vec.push(Math.abs(val)/pk);
+  }
+  return vec;
+}
+function averageVectors(vectors){
+  if(!vectors.length) return [];
+  var len = vectors[0].length;
+  var avg = new Array(len).fill(0);
+  vectors.forEach(function(v){ for(var i=0;i<len;i++) avg[i]+=v[i]/vectors.length; });
+  return avg;
+}
+
+// Stan nagrywania WIELU wzorców naraz (zamiast jednego)
+var CAL_TAKES_TARGET = 3; // ile nagrań wzorca chcemy zebrać
+var calTakes = []; // [{ph1,ph2,ph3,quietThresh,pkRatio,shapeVec}, ...] po jednym na nagranie
+
+var calParams=null; // wyniki analizy wzorca
+
+try{
+  const s=JSON.parse(localStorage.getItem('pitchrec_timing')||'{}');
+  if(s.ph1>=0.5)ph1=s.ph1;
+  if(s.ph2>=0.3)ph2=s.ph2;
+  if(s.ph3>=0.1)ph3=s.ph3;
+  if(s.quietThresh>=0.05)quietThresh=s.quietThresh;
+  if(s.tolerance>=0.05&&s.tolerance<=0.30)tolerance=s.tolerance;
+  if(s.pkRatio>=2)pkRatio=s.pkRatio;
+}catch(e){}
+
+function updateUI(){
+  document.getElementById('sv1').textContent=ph1.toFixed(1)+'s';
+  document.getElementById('sv2').textContent=ph2.toFixed(1)+'s';
+  document.getElementById('sv3').textContent=ph3.toFixed(1)+'s';
+  document.getElementById('pv1').textContent=ph1.toFixed(1)+'s';
+  document.getElementById('pv2').textContent=ph2.toFixed(1)+'s';
+  document.getElementById('pv3').textContent=ph3.toFixed(1)+'s';
+  document.getElementById('totalTime').textContent=(ph1+ph2+ph3).toFixed(1)+'s';
+  var pkRatioEl=document.getElementById('pkRatioDisp');
+  if(pkRatioEl)pkRatioEl.textContent='×'+pkRatio.toFixed(1);
+  const qPct=Math.round(quietThresh*100);
+  document.getElementById('svQ').textContent=qPct+'%';
+  const qp=(quietThresh-0.05)/0.85;
+  document.getElementById('sfQ').style.width=(qp*100)+'%';
+  document.getElementById('stQ').style.left=(qp*100)+'%';
+  document.getElementById('qDesc').textContent=
+    quietThresh<0.2?tT('s1lbl')+': bardzo ścisłe':
+    quietThresh<0.35?'Standardowe':
+    quietThresh<0.55?'Łagodne':'Bardzo łagodne';
+  const tolPct=Math.round(tolerance*100);
+  document.getElementById('svTol').textContent=tolPct+'%';
+  const tp=(tolerance-0.05)/0.25;
+  document.getElementById('sfTol').style.width=(tp*100)+'%';
+  document.getElementById('stTol').style.left=(tp*100)+'%';
+  document.getElementById('tolDsc2').textContent=
+    tolerance<0.08?'Rygorystyczna (dla zaawansowanych)':
+    tolerance<0.15?'Standardowa':
+    tolerance<0.22?'Łagodna':'Bardzo łagodna (dla początkujących)';
+  drawPhaseDiagram();
+  updateSliderUI();
+}
+
+function updateSliderUI(){
+  [[0.5,3.0,ph1,'sf1','st1'],[0.5,4.0,ph2,'sf2','st2'],[0.1,1.5,ph3,'sf3','st3']].forEach(function(r){
+    var mn=r[0],mx=r[1],val=r[2],fi=r[3],ti=r[4];
+    var p=(val-mn)/(mx-mn);
+    document.getElementById(fi).style.width=(p*100)+'%';
+    document.getElementById(ti).style.left=(p*100)+'%';
+  });
+}
+
+function drawPhaseDiagram(){
+  var cv=document.getElementById('phaseCv');
+  var W=cv.offsetWidth*DPR, H=cv.offsetHeight*DPR;
+  cv.width=W; cv.height=H;
+  var ctx=cv.getContext('2d');
+  ctx.fillStyle='#eeeef5'; ctx.fillRect(0,0,W,H);
+  var total=ph1+ph2+ph3+ph2*0.6; // plateau ≈ 60% narastania
+  var x1=ph1/total;
+  var x2=(ph1+ph2)/total;
+  var x3=(ph1+ph2+ph2*0.6)/total;
+  var pts=[];
+  // faza leniwa - cicha
+  for(var i=0;i<=15;i++){var tt=i/15*x1; pts.push([tt, 0.04+Math.pow(tt/x1,3)*0.1]);}
+  // narastanie
+  for(var i=0;i<=25;i++){var tt=x1+i/25*(x2-x1); pts.push([tt, 0.14+Math.pow(i/25,1.5)*0.8]);}
+  // plateau
+  for(var i=0;i<=20;i++){var tt=x2+i/20*(x3-x2); pts.push([tt, 0.9+0.06*Math.sin(i/20*Math.PI*2)]);}
+  // opadanie
+  for(var i=0;i<=20;i++){var tt=x3+i/20*(1-x3); pts.push([tt, 0.9*Math.pow(1-i/20,1.8)]);}
+
+  ctx.beginPath();
+  pts.forEach(function(p,i){var x=p[0]*W,y=H-(p[1]*(H-4))-2; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+  ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath();
+  var g=ctx.createLinearGradient(0,0,W,0);
+  g.addColorStop(0,'rgba(139,126,255,.4)');
+  g.addColorStop(x1,'rgba(139,126,255,.4)');
+  g.addColorStop(x1+0.01,'rgba(0,229,160,.6)');
+  g.addColorStop(x2,'rgba(0,229,160,.7)');
+  g.addColorStop(x3,'rgba(0,229,160,.5)');
+  g.addColorStop(x3+0.01,'rgba(255,184,48,.5)');
+  g.addColorStop(1,'rgba(255,184,48,.1)');
+  ctx.fillStyle=g; ctx.fill();
+  ctx.beginPath();
+  pts.forEach(function(p,i){var x=p[0]*W,y=H-(p[1]*(H-4))-2; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+  ctx.strokeStyle='rgba(30,30,60,.25)'; ctx.lineWidth=1.5*DPR; ctx.stroke();
+  [[x1,'rgba(139,126,255,.6)'],[x2,'rgba(0,229,160,.5)'],[x3,'rgba(255,184,48,.5)']].forEach(function(d){
+    ctx.strokeStyle=d[1]; ctx.lineWidth=1; ctx.setLineDash([3,4]);
+    ctx.beginPath(); ctx.moveTo(d[0]*W,0); ctx.lineTo(d[0]*W,H); ctx.stroke(); ctx.setLineDash([]);
+  });
+}
+
+// ─── KALIBRACJA ────────────────────────────────────────────────────
+var calRafId=null, calCvW=0, calCvH=0;
+
+function drawCalWaveform(){
+  var cv=document.getElementById('calCv');
+  if(!calCvW){calCvW=cv.offsetWidth*DPR;calCvH=cv.offsetHeight*DPR;cv.width=calCvW;cv.height=calCvH;}
+  var ctx=cv.getContext('2d');
+  ctx.fillStyle='#eeeef5'; ctx.fillRect(0,0,calCvW,calCvH);
+  if(calBuf.length<2)return;
+  var step=Math.max(1,Math.floor(calBuf.length/calCvW));
+  ctx.beginPath();
+  for(var i=0;i<calCvW;i++){
+    var idx=Math.min(Math.floor(i*calBuf.length/calCvW), calBuf.length-1);
+    var v=calBuf[idx];
+    var y=calCvH-(v*calCvH*0.9)-calCvH*0.05;
+    i===0?ctx.moveTo(i,y):ctx.lineTo(i,y);
+  }
+  ctx.strokeStyle='#00875a'; ctx.lineWidth=1.5; ctx.stroke();
+  if(calRecording)calRafId=requestAnimationFrame(drawCalWaveform);
+}
+
+async function toggleCalRecording(){
+  if(calRecording){
+    stopCalRecording();
+  } else {
+    await startCalRecording();
+  }
+}
+
+async function startCalRecording(){
+  try{
+    calStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+  }catch(e){alert('Brak dostępu do mikrofonu'); return;}
+  calAC=new (window.AudioContext||window.webkitAudioContext)();
+  var src=calAC.createMediaStreamSource(calStream);
+  calProc=calAC.createScriptProcessor(2048,1,1);
+  calBuf=[];
+  calProc.onaudioprocess=function(e){
+    var d=e.inputBuffer.getChannelData(0);
+    var sum=0; for(var i=0;i<d.length;i++)sum+=d[i]*d[i];
+    calBuf.push(Math.sqrt(sum/d.length));
+  };
+  src.connect(calProc); calProc.connect(calAC.destination);
+  calRecording=true;
+  document.getElementById('calBtn').classList.add('recording');
+  document.getElementById('calBtnIcon').textContent='⏹';
+  document.getElementById('calBtnLbl').textContent=tT('calBtnRecLbl');
+  document.getElementById('calResult').classList.remove('show');
+  calCvW=0; // reset canvas size
+  drawCalWaveform();
+}
+
+function stopCalRecording(){
+  calRecording=false;
+  if(calRafId)cancelAnimationFrame(calRafId);
+  if(calProc){calProc.disconnect();}
+  if(calAC){calAC.close();}
+  if(calStream){calStream.getTracks().forEach(function(t){t.stop();});}
+  document.getElementById('calBtn').classList.remove('recording');
+  document.getElementById('calBtnIcon').textContent='⏺';
+  document.getElementById('calBtnLbl').textContent=tT('calBtnLbl');
+  drawCalWaveform();
+  if(calBuf.length>30)analyzeCalibration();
+}
+
+function computeCalibrationFromBuf(rawBuf){
+  // Wygładzenie buforu (średnia krocząca 5 próbek)
+  var buf=[];
+  for(var i=0;i<rawBuf.length;i++){
+    var s=0,c=0;
+    for(var j=Math.max(0,i-2);j<=Math.min(rawBuf.length-1,i+2);j++){s+=rawBuf[j];c++;}
+    buf.push(s/c);
+  }
+  var N=buf.length;
+  var pk=Math.max.apply(null,buf);
+  if(pk<0.002) return null; // zbyt ciche nagranie
+
+  // 1. Próg ciszy: mediana pierwszych 20% próbek * 1.5
+  var quietEnd=Math.floor(N*0.15);
+  var quietSample=buf.slice(0,quietEnd).slice().sort(function(a,b){return a-b;});
+  var quietMedian=quietSample[Math.floor(quietSample.length/2)]||0.01;
+  var detectedThresh=Math.min(0.85, Math.max(0.1, quietMedian*2.5/pk));
+
+  // 2. Znajdź koniec fazy leniwej: pierwszy moment gdy rms > 25% szczytu
+  var riseThreshVal=pk*0.25;
+  var phase1End=0;
+  for(var i=0;i<N;i++){if(buf[i]>riseThreshVal){phase1End=i;break;}}
+  if(phase1End===0)phase1End=Math.floor(N*0.1);
+
+  // 3. Znajdź szczyt: indeks max wartości
+  var pkIdx=0; for(var i=0;i<N;i++){if(buf[i]>buf[pkIdx])pkIdx=i;}
+
+  // 4. Szukaj początku plateau: ostatni raz przed pkIdx gdy buf < 90% szczytu
+  var plateauStart=pkIdx;
+  for(var i=pkIdx;i>phase1End;i--){if(buf[i]<pk*0.90){plateauStart=i;break;}}
+
+  // 5. Szukaj końca plateau: pierwszy moment po pkIdx gdy buf < 70% szczytu
+  var plateauEnd=pkIdx;
+  for(var i=pkIdx;i<N;i++){if(buf[i]<pk*0.70){plateauEnd=i;break;}}
+  if(plateauEnd===pkIdx)plateauEnd=Math.min(N-1,pkIdx+Math.floor(N*0.05));
+
+  var fpsCal=21.5;
+
+  var t1=phase1End/fpsCal;
+  var t2=(plateauStart-phase1End)/fpsCal;
+  var tplat=(plateauEnd-plateauStart)/fpsCal;
+  var t3=(N-plateauEnd)/fpsCal;
+
+  t1=Math.max(0.3,Math.min(3.0,t1));
+  t2=Math.max(0.3,Math.min(4.0,t2));
+  t3=Math.max(0.1,Math.min(1.5,t3));
+
+  var quietAvgCal=0;
+  for(var i=0;i<phase1End;i++) quietAvgCal+=buf[i];
+  quietAvgCal/=Math.max(1,phase1End);
+  var pkRatio=quietAvgCal>0.001?Math.round((pk/quietAvgCal)*10)/10:10;
+  pkRatio=Math.max(2,Math.min(50,pkRatio));
+
+  var shapeVec=extractShapeVector(buf,60);
+
+  return {ph1:Math.round(t1*10)/10, ph2:Math.round(t2*10)/10, ph3:Math.round(t3*10)/10,
+    quietThresh:Math.round(detectedThresh*100)/100, plateauTime:Math.round(tplat*10)/10,
+    pkRatio:pkRatio, shapeVec:shapeVec};
+}
+
+function analyzeCalibration(){
+  var result=computeCalibrationFromBuf(calBuf);
+  if(!result){ alert('Nagranie zbyt ciche — spróbuj bliżej mikrofonu'); return; }
+
+  calTakes.push(result);
+  var remaining=CAL_TAKES_TARGET-calTakes.length;
+
+  if(remaining>0){
+    // Jeszcze potrzeba więcej nagrań — pokaż progres, poproś o kolejne
+    document.getElementById('calResult').classList.remove('show');
+    var progressEl=document.getElementById('calProgress');
+    if(progressEl){
+      progressEl.textContent='✅ Nagranie '+calTakes.length+'/'+CAL_TAKES_TARGET+' zapisane — nagraj kolejny wzorzec (im więcej, tym stabilniejszy)';
+      progressEl.style.display='block';
+    }
+    return;
+  }
+
+  // Zebrano wszystkie nagrania — uśrednij
+  var avgPh1=calTakes.reduce(function(s,t){return s+t.ph1;},0)/calTakes.length;
+  var avgPh2=calTakes.reduce(function(s,t){return s+t.ph2;},0)/calTakes.length;
+  var avgPh3=calTakes.reduce(function(s,t){return s+t.ph3;},0)/calTakes.length;
+  var avgQuiet=calTakes.reduce(function(s,t){return s+t.quietThresh;},0)/calTakes.length;
+  var avgPkRatio=calTakes.reduce(function(s,t){return s+t.pkRatio;},0)/calTakes.length;
+  var avgPlateauTime=calTakes.reduce(function(s,t){return s+t.plateauTime;},0)/calTakes.length;
+  var avgShapeVec=averageVectors(calTakes.map(function(t){return t.shapeVec;}));
+
+  calParams={ph1:Math.round(avgPh1*10)/10, ph2:Math.round(avgPh2*10)/10, ph3:Math.round(avgPh3*10)/10,
+    quietThresh:Math.round(avgQuiet*100)/100, plateauTime:Math.round(avgPlateauTime*10)/10,
+    pkRatio:Math.round(avgPkRatio*10)/10, shapeVec:avgShapeVec};
+
+  var progressEl2=document.getElementById('calProgress');
+  if(progressEl2){
+    progressEl2.textContent='✅ Zebrano '+CAL_TAKES_TARGET+' nagrań — uśredniony wzorzec gotowy';
+  }
+
+  // Pokaż wyniki
+  document.getElementById('calR1').textContent=calParams.ph1.toFixed(1)+'s';
+  document.getElementById('calR2').textContent=calParams.ph2.toFixed(1)+'s';
+  document.getElementById('calR3').textContent=calParams.plateauTime.toFixed(1)+'s';
+  document.getElementById('calR4').textContent=calParams.ph3.toFixed(1)+'s';
+  document.getElementById('calR5').textContent=Math.round(calParams.quietThresh*100)+'%';
+  document.getElementById('calR6').textContent='×'+calParams.pkRatio.toFixed(1);
+  document.getElementById('calResult').classList.add('show');
+}
+
+function resetCalTakes(){
+  calTakes=[];
+  var progressEl=document.getElementById('calProgress');
+  if(progressEl) progressEl.style.display='none';
+  document.getElementById('calResult').classList.remove('show');
+}
+
+function applyCalibration(){
+  if(!calParams)return;
+  ph1=calParams.ph1;
+  ph2=calParams.ph2;
+  ph3=calParams.ph3;
+  quietThresh=calParams.quietThresh;
+  pkRatio=calParams.pkRatio;
+  saveTimingSettings();
+  // Zapisz uśredniony "kształt" wzorca — do porównania podobieństwa w index.html
+  if(calParams.shapeVec){
+    try{ localStorage.setItem('pitchrec_shape_reference', JSON.stringify(calParams.shapeVec)); }catch(e){}
+  }
+  updateUI();
+  document.getElementById('calResult').classList.remove('show');
+  // Krótki flash potwierdzenia
+  var btn=document.getElementById('calApplyBtn');
+  btn.textContent='✓ Zastosowano!';
+  setTimeout(function(){btn.textContent='✓ '+tT('calApplyLbl');},1500);
+}
+
+// ─── SUWAKI ────────────────────────────────────────────────────────
+function makeSlider(id,mn,mx,getter,setter){
+  var t=document.getElementById(id); var drag=false;
+  var p=function(e){var r=t.getBoundingClientRect();return Math.max(0,Math.min(1,((e.touches?e.touches[0].clientX:e.clientX)-r.left)/r.width));};
+  var apply=function(e){setter(Math.round((mn+p(e)*(mx-mn))*100)/100);updateUI();setLang(curTrainLang);};
+  t.addEventListener('mousedown',function(e){drag=true;apply(e);e.preventDefault();});
+  t.addEventListener('touchstart',function(e){drag=true;apply(e);e.preventDefault();},{passive:false});
+  window.addEventListener('mousemove',function(e){if(drag)apply(e);});
+  window.addEventListener('touchmove',function(e){if(drag)apply(e);},{passive:false});
+  window.addEventListener('mouseup',function(){drag=false;});
+  window.addEventListener('touchend',function(){drag=false;});
+}
+
+function saveTimingSettings(){
+  try{
+    localStorage.setItem('pitchrec_timing',JSON.stringify({
+      ph1:ph1,ph2:ph2,ph3:ph3,quietThresh:quietThresh,tolerance:tolerance,
+      pkRatio:pkRatio,
+      min:ph1*0.4, max:ph1+ph2+ph3+0.8,
+    }));
+  }catch(e){}
+}
+
+makeSlider('s1t',0.5,3.0,function(){return ph1;},function(v){ph1=Math.round(v*10)/10;saveTimingSettings();});
+makeSlider('s2t',0.5,4.0,function(){return ph2;},function(v){ph2=Math.round(v*10)/10;saveTimingSettings();});
+makeSlider('s3t',0.1,1.5,function(){return ph3;},function(v){ph3=Math.round(v*10)/10;saveTimingSettings();});
+makeSlider('sQt',0.05,0.9,function(){return quietThresh;},function(v){quietThresh=Math.round(v*100)/100;saveTimingSettings();});
+makeSlider('sTol',0.05,0.30,function(){return tolerance;},function(v){tolerance=Math.round(v*100)/100;saveTimingSettings();});
+
+// (Usunięto suwaki bramki szumów i zakresu pauzy — wykrywanie mowy jest teraz w pełni automatyczne,
+// wylicza się statystycznie z nagrania kalibracyjnego, bez potrzeby ręcznego strojenia)
+
+document.getElementById('saveBtn').addEventListener('click',function(){
+  saveTimingSettings();
+  var msg=document.getElementById('saved');
+  msg.style.opacity='1';
+  setTimeout(function(){location.href='index.html';},700);
+});
+
+window.addEventListener('resize',drawPhaseDiagram);
+setLang(curTrainLang);
+updateUI();
+</script>
+</body>
+</html>
