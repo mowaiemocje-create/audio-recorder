@@ -1,15 +1,13 @@
-import { BackgroundMode } from '@capacitor-community/background-mode';
+
 
 let mediaRecorder;
 let audioChunks = [];
 
 async function startRecording() {
-  // Włączenie usługi w tle, chroniącej proces przed zamknięciem przez Androida
-  try {
-    await BackgroundMode.enable();
-    await BackgroundMode.disableWebViewOptimizations(); // Utrzymuje pętlę zdarzeń JS przy zablokowanym ekranie
-  } catch (e) {
-    console.log('Uruchomiono w standardowej przeglądarce');
+  // Włączenie usługi w tle na telefonie (jeśli uruchomione jako APK)
+  if (window.cordova && window.cordova.plugins && window.cordova.plugins.backgroundMode) {
+    window.cordova.plugins.backgroundMode.enable();
+    window.cordova.plugins.backgroundMode.disableWebViewOptimizations();
   }
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -19,21 +17,18 @@ async function startRecording() {
   mediaRecorder.ondataavailable = (event) => {
     if (event.data.size > 0) {
       audioChunks.push(event.data);
-      // Przekaż dane do swojego wykresu audio
       updateAudioChart(event.data);
     }
   };
 
-  mediaRecorder.start(100); // Próbkowanie co 100ms
+  mediaRecorder.start(100);
 }
 
 async function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
   }
-  try {
-    await BackgroundMode.disable();
-  } catch (e) {
-    console.log('Tło wyłączone');
+  if (window.cordova && window.cordova.plugins && window.cordova.plugins.backgroundMode) {
+    window.cordova.plugins.backgroundMode.disable();
   }
 }

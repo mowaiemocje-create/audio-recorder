@@ -8,7 +8,7 @@
   "dependencies": {
     "@capacitor/core": "^6.0.0",
     "@capacitor/android": "^6.0.0",
-    "@capacitor-community/background-mode": "^6.0.0"
+    "cordova-plugin-background-mode": "^0.7.3"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.0.0"
