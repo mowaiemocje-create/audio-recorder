@@ -26,11 +26,17 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Capacitor Sync and Add Permissions
+      - name: Capacitor Sync and Add Service Config
         run: |
           npx cap add android || true
           MANIFEST="android/app/src/main/AndroidManifest.xml"
+          
+          # Dodanie uprawnień
           sed -i '/<manifest/a \    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />' $MANIFEST
+          
+          # Rejestracja usługi w tle w sekcji application
+          sed -i '/<application/a \        <service android:name="de.appplant.cordova.plugin.background.ForegroundService" android:foregroundServiceType="microphone" android:exported="false" />' $MANIFEST
+
           npx cap sync android
 
       - name: Build APK

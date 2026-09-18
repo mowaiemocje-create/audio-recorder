@@ -32,3 +32,19 @@ async function stopRecording() {
     window.cordova.plugins.backgroundMode.disable();
   }
 }
+document.addEventListener('deviceready', () => {
+  if (window.cordova && window.cordova.plugins && window.cordova.plugins.backgroundMode) {
+    const bg = window.cordova.plugins.backgroundMode;
+    
+    bg.setDefaults({
+      title: 'Nagrywanie w tle',
+      text: 'Trwa nagrywanie dźwięku...',
+      resume: true,
+      hidden: false,
+      bigText: true
+    });
+    
+    bg.enable();
+    bg.disableWebViewOptimizations();
+  }
+}, false);
