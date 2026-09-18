@@ -1,4 +1,4 @@
-import { BackgroundMode } from '@capawesome/capacitor-background-mode';
+import { BackgroundMode } from '@capacitor-community/background-mode';
 
 let mediaRecorder;
 let audioChunks = [];
