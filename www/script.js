@@ -1,8 +1,5 @@
-// Zmienna do śledzenia stanu
 let isRecording = false;
-let autoStopTimer = null;
 
-// Główna funkcja wywoływana przez Twój przycisk
 async function toggleRecording() {
   if (!isRecording) {
     await startNativeRecording();
@@ -12,12 +9,17 @@ async function toggleRecording() {
 }
 
 async function startNativeRecording() {
-  // Jeśli uruchomiono na telefonie z Capacitor
   if (window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
+      const KeepAwake = window.Capacitor.Plugins.KeepAwake;
 
-      // Sprawdzenie uprawnień
+      // 1. Zapobiegaj uśpieniu procesora po wygaszeniu ekranu
+      if (KeepAwake) {
+        await KeepAwake.keepAwake();
+      }
+
+      // 2. Sprawdź uprawnienia do mikrofonu
       const hasPerm = await VoiceRecorder.hasAudioRecordingPermission();
       if (!hasPerm.value) {
         const req = await VoiceRecorder.requestAudioRecordingPermission();
@@ -27,24 +29,16 @@ async function startNativeRecording() {
         }
       }
 
-      // Start nagrywania natywnego
+      // 3. Rozpocznij nagrywanie natywne
       const result = await VoiceRecorder.startRecording();
       if (result.value) {
         isRecording = true;
-        console.log("Natywne nagrywanie uruchomione.");
-
-        // Wyczyszczenie ewentualnych timerów, które mogłyby zatrzymać nagrywanie po 5s
-        if (autoStopTimer) clearTimeout(autoStopTimer);
-
-        // Wywołanie Twoich oryginalnych funkcji interfejsu (jeśli istnieją w index.html)
         if (typeof updateUI === "function") updateUI(true);
         if (typeof startVisualizer === "function") startVisualizer();
       }
     } catch (err) {
-      alert("Błąd natywnego nagrywania: " + JSON.stringify(err));
+      alert("Błąd startu nagrywania: " + JSON.stringify(err));
     }
-  } else {
-    alert("Aplikacja nie działa w trybie natywnym Androida!");
   }
 }
 
@@ -52,8 +46,15 @@ async function stopNativeRecording() {
   if (window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
+      const KeepAwake = window.Capacitor.Plugins.KeepAwake;
+
       const result = await VoiceRecorder.stopRecording();
       isRecording = false;
+
+      // Zezwól na ponowne usypianie urządzenia
+      if (KeepAwake) {
+        await KeepAwake.allowSleep();
+      }
 
       if (typeof updateUI === "function") updateUI(false);
       if (typeof stopVisualizer === "function") stopVisualizer();
