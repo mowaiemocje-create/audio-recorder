@@ -2,19 +2,25 @@ async function startRecording() {
   if (window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
+
+      // 1. Sprawdzenie statusu uprawnień
+      const status = await VoiceRecorder.hasAudioRecordingPermission();
       
-      // 1. Sprawdzenie i prośba o uprawnienia
-      const hasPermission = await VoiceRecorder.hasAudioRecordingPermission();
-      if (!hasPermission.value) {
-        await VoiceRecorder.requestAudioRecordingPermission();
+      if (!status.value) {
+        // 2. Wymuszenie okna dialogowego w Androidzie
+        const requested = await VoiceRecorder.requestAudioRecordingPermission();
+        if (!requested.value) {
+          alert("Uprawnienie do mikrofonu jest wymagane do nagrywania.");
+          return;
+        }
       }
 
-      // 2. Uruchomienie natywnego nagrywania w tle
+      // 3. Rozpoczęcie nagrywania w tle
       await VoiceRecorder.startRecording();
-      console.log("Natywne nagrywanie w tle uruchomione.");
+      console.log("Natywne nagrywanie w tle zostało uruchomione.");
     } catch (err) {
       console.error("Błąd nagrywania:", err);
-      alert("Błąd: " + (err.message || err));
+      alert("Błąd mikrofonu: " + (err.message || err));
     }
     return;
   }

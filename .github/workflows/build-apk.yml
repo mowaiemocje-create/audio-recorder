@@ -26,9 +26,37 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Capacitor Sync
+      - name: Capacitor Sync & Inject Permissions
         run: |
           npx cap add android || true
+
+          cat << 'PYEOF' > inject_manifest.py
+          manifest_path = "android/app/src/main/AndroidManifest.xml"
+          with open(manifest_path, "r") as f:
+              manifest = f.read()
+
+          needed_permissions = [
+              "android.permission.RECORD_AUDIO",
+              "android.permission.MODIFY_AUDIO_SETTINGS",
+              "android.permission.FOREGROUND_SERVICE",
+              "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+              "android.permission.POST_NOTIFICATIONS",
+              "android.permission.WAKE_LOCK"
+          ]
+
+          perm_tags = ""
+          for p in needed_permissions:
+              if f'name="{p}"' not in manifest:
+                  perm_tags += f'    <uses-permission android:name="{p}" />\n'
+
+          if perm_tags:
+              manifest = manifest.replace("</manifest>", f"{perm_tags}</manifest>")
+
+          with open(manifest_path, "w") as f:
+              f.write(manifest)
+          PYEOF
+
+          python3 inject_manifest.py
           npx cap sync android
 
       - name: Build APK
