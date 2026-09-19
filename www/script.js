@@ -1,15 +1,24 @@
 async function startRecording() {
   if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeAudio) {
-    await window.Capacitor.Plugins.NativeAudio.startRecord();
-    console.log("Uruchomiono czyste natywne nagrywanie Java w tle");
+    try {
+      await window.Capacitor.Plugins.NativeAudio.startRecord();
+      console.log("Natywne nagrywanie w tle uruchomione");
+    } catch (err) {
+      console.error("Błąd nagrywania natywnego:", err);
+      alert("Błąd: " + (err.message || err));
+    }
   } else {
-    alert("Wersja przeglądarkowa - uruchom aplikację na telefonie jako APK");
+    alert("Wersja przeglądarkowa – przetestuj na pliku APK w telefonie");
   }
 }
 
 async function stopRecording() {
   if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeAudio) {
-    await window.Capacitor.Plugins.NativeAudio.stopRecord();
-    console.log("Natywne nagrywanie zatrzymane. Plik zapisano w pamięci aplikacji");
+    try {
+      await window.Capacitor.Plugins.NativeAudio.stopRecord();
+      console.log("Natywne nagrywanie zatrzymane");
+    } catch (err) {
+      console.error("Błąd zatrzymania:", err);
+    }
   }
 }

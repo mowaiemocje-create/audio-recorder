@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Capacitor Sync & Inject Native Service with Mic & Location Permissions
+      - name: Capacitor Sync & Inject Fixed Native Permission Handler
         run: |
           npx cap add android || true
 
@@ -35,7 +35,7 @@ jobs:
           dir_path = "android/app/src/main/java/com/example/audiorecorder"
           os.makedirs(dir_path, exist_ok=True)
 
-          # 1. Natywna usługa nagrywania AudioService.java
+          # 1. Natywna usługa nagrywania w Javie
           service_code = """package com.example.audiorecorder;
 
           import android.app.Notification;
@@ -77,18 +77,14 @@ jobs:
 
               private void startForegroundServiceWithNotification() {
                   Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
-                          .setContentTitle("Nagrywanie i GPS w tle")
-                          .setContentText("Aplikacja rejestruje dźwięk oraz pozycję...")
+                          .setContentTitle("Nagrywanie w tle")
+                          .setContentText("Dyktafon rejestruje dźwięk...")
                           .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                           .setPriority(NotificationCompat.PRIORITY_LOW)
                           .build();
 
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                      int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                          type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
-                      }
-                      startForeground(NOTIFICATION_ID, notification, type);
+                      startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
                   } else {
                       startForeground(NOTIFICATION_ID, notification);
                   }
@@ -140,7 +136,7 @@ jobs:
           with open(os.path.join(dir_path, "AudioService.java"), "w") as f:
               f.write(service_code)
 
-          # 2. Wtyczka Capacitora pytająca o mikrofon I lokalizację
+          # 2. Poprawiona wtyczka Capacitora z bezpośrednim natywnym zapytaniem o mikrofon
           plugin_code = """package com.example.audiorecorder;
 
           import android.Manifest;
@@ -160,10 +156,6 @@ jobs:
                   @Permission(
                       alias = "microphone",
                       strings = { Manifest.permission.RECORD_AUDIO }
-                  ),
-                  @Permission(
-                      alias = "location",
-                      strings = { Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION }
                   )
               }
           )
@@ -171,39 +163,47 @@ jobs:
 
               @PluginMethod
               public void startRecord(PluginCall call) {
-                  if (getPermissionState("microphone") != PermissionState.GRANTED || getPermissionState("location") != PermissionState.GRANTED) {
-                      requestAllPermissions(call, "permissionsCallback");
+                  if (getPermissionState("microphone") != PermissionState.GRANTED) {
+                      requestPermissionForAlias("microphone", call, "micCallback");
                   } else {
                       startServiceInternal(call);
                   }
               }
 
               @PermissionCallback
-              private void permissionsCallback(PluginCall call) {
+              private void micCallback(PluginCall call) {
                   if (getPermissionState("microphone") == PermissionState.GRANTED) {
                       startServiceInternal(call);
                   } else {
-                      call.reject("Wymagane uprawnienia nie zostały przyznane");
+                      call.reject("Brak uprawnień do mikrofonu");
                   }
               }
 
               private void startServiceInternal(PluginCall call) {
-                  Intent intent = new Intent(getContext(), AudioService.class);
-                  intent.setAction("START");
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      getContext().startForegroundService(intent);
-                  } else {
-                      getContext().startService(intent);
+                  try {
+                      Intent intent = new Intent(getContext(), AudioService.class);
+                      intent.setAction("START");
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          getContext().startForegroundService(intent);
+                      } else {
+                          getContext().startService(intent);
+                      }
+                      call.resolve();
+                  } catch (Exception e) {
+                      call.reject("Błąd uruchamiania usługi: " + e.getMessage());
                   }
-                  call.resolve();
               }
 
               @PluginMethod
               public void stopRecord(PluginCall call) {
-                  Intent intent = new Intent(getContext(), AudioService.class);
-                  intent.setAction("STOP");
-                  getContext().startService(intent);
-                  call.resolve();
+                  try {
+                      Intent intent = new Intent(getContext(), AudioService.class);
+                      intent.setAction("STOP");
+                      getContext().startService(intent);
+                      call.resolve();
+                  } catch (Exception e) {
+                      call.reject("Błąd zatrzymywania usługi: " + e.getMessage());
+                  }
               }
           }
           """
@@ -227,23 +227,19 @@ jobs:
           with open(os.path.join(dir_path, "MainActivity.java"), "w") as f:
               f.write(activity_code)
 
-          # 4. AndroidManifest.xml z pełną listą uprawnień
+          # 4. AndroidManifest.xml
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           with open(manifest_path, "r") as f:
               manifest = f.read()
 
           perms = """
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-              <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
           """
           serv = """
-              <service android:name=".AudioService" android:foregroundServiceType="microphone|location" android:exported="false" />
+              <service android:name=".AudioService" android:foregroundServiceType="microphone" android:exported="false" />
           """
 
           if "</manifest>" in manifest and "RECORD_AUDIO" not in manifest:
