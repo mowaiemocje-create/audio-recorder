@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Capacitor Sync & Inject Native Startup Permissions
+      - name: Capacitor Sync & Fix WebView & System Permissions
         run: |
           npx cap add android || true
 
@@ -35,13 +35,15 @@ jobs:
           dir_path = "android/app/src/main/java/com/example/audiorecorder"
           os.makedirs(dir_path, exist_ok=True)
 
-          # 1. MainActivity.java - pytamy o uprawnienia od razu po otwarciu aplikacji
+          # 1. MainActivity.java z odblokowaniem mikrofonu w WebView (WebChromeClient)
           activity_code = """package com.example.audiorecorder;
 
           import android.Manifest;
           import android.content.pm.PackageManager;
           import android.os.Build;
           import android.os.Bundle;
+          import android.webkit.PermissionRequest;
+          import android.webkit.WebChromeClient;
           import androidx.core.app.ActivityCompat;
           import androidx.core.content.ContextCompat;
           import com.getcapacitor.BridgeActivity;
@@ -51,38 +53,38 @@ jobs:
               protected void onCreate(Bundle savedInstanceState) {
                   registerPlugin(AudioRecorderPlugin.class);
                   super.onCreate(savedInstanceState);
-                  requestAppPermissions();
+
+                  // Odblokowanie dostępu do mikrofonu dla silnika WebView
+                  if (this.bridge != null && this.bridge.getWebView() != null) {
+                      this.bridge.getWebView().setWebChromeClient(new WebChromeClient() {
+                          @Override
+                          public void onPermissionRequest(final PermissionRequest request) {
+                              request.grant(request.getResources());
+                          }
+                      });
+                  }
+
+                  requestSystemPermissions();
               }
 
-              private void requestAppPermissions() {
+              private void requestSystemPermissions() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                      String[] permissions;
+                      String[] perms;
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                          permissions = new String[]{
+                          perms = new String[]{
                               Manifest.permission.RECORD_AUDIO,
                               Manifest.permission.ACCESS_FINE_LOCATION,
                               Manifest.permission.ACCESS_COARSE_LOCATION,
                               Manifest.permission.POST_NOTIFICATIONS
                           };
                       } else {
-                          permissions = new String[]{
+                          perms = new String[]{
                               Manifest.permission.RECORD_AUDIO,
                               Manifest.permission.ACCESS_FINE_LOCATION,
                               Manifest.permission.ACCESS_COARSE_LOCATION
                           };
                       }
-
-                      boolean needRequest = false;
-                      for (String perm : permissions) {
-                          if (ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
-                              needRequest = true;
-                              break;
-                          }
-                      }
-
-                      if (needRequest) {
-                          ActivityCompat.requestPermissions(this, permissions, 101);
-                      }
+                      ActivityCompat.requestPermissions(this, perms, 101);
                   }
               }
           }
@@ -90,7 +92,7 @@ jobs:
           with open(os.path.join(dir_path, "MainActivity.java"), "w") as f:
               f.write(activity_code)
 
-          # 2. AudioRecorderPlugin.java - sprawdzanie uprawnień przed uruchomieniem
+          # 2. AudioRecorderPlugin.java
           plugin_code = """package com.example.audiorecorder;
 
           import android.Manifest;
@@ -109,15 +111,17 @@ jobs:
 
               @PluginMethod
               public void startRecord(PluginCall call) {
-                  if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                  boolean micGranted = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+
+                  if (!micGranted) {
                       if (getActivity() != null) {
                           ActivityCompat.requestPermissions(
                               getActivity(),
-                              new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_FINE_LOCATION},
+                              new String[]{ Manifest.permission.RECORD_AUDIO },
                               101
                           );
                       }
-                      call.reject("Brak uprawnienia do mikrofonu. Zezwól w oknie systemowym i naciśnij ponownie Record.");
+                      call.reject("Uprawnienie do mikrofonu wymagane. Kliknij Record ponownie.");
                       return;
                   }
 
