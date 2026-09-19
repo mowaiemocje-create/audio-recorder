@@ -26,9 +26,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Capacitor Sync and Safe Manifest Update
+      - name: Capacitor Sync & Inject Native Background Lock
         run: |
           npx cap add android || true
+
+          # 1. Wstrzyknięcie uprawnień do AndroidManifest.xml
           python3 -c '
           path = "android/app/src/main/AndroidManifest.xml"
           with open(path, "r") as f:
@@ -42,22 +44,70 @@ jobs:
               <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
-          """
-
-          service = """
-              <service android:name="de.appplant.cordova.plugin.background.ForegroundService" android:foregroundServiceType="microphone" android:exported="false" />
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
           """
 
           if "</manifest>" in content and "RECORD_AUDIO" not in content:
               content = content.replace("</manifest>", f"{permissions}\n</manifest>")
-          if "</application>" in content and "ForegroundService" not in content:
-              content = content.replace("</application>", f"{service}\n</application>")
 
           with open(path, "w") as f:
               f.write(content)
           '
+
+          # 2. Wstrzyknięcie natywnej blokady uśpienia (WakeLock) do MainActivity.java
+          python3 -c '
+          path = "android/app/src/main/java/com/example/audiorecorder/MainActivity.java"
+          java_code = """package com.example.audiorecorder;
+
+          import android.os.Bundle;
+          import android.os.PowerManager;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.os.Build;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              private PowerManager.WakeLock wakeLock;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  // Natywne wymuszenie pracy procesora po zablokowaniu ekranu
+                  PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+                  if (powerManager != null) {
+                      wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AudioRecorder::WakeLock");
+                      wakeLock.acquire();
+                  }
+
+                  // Utworzenie oficjalnego kanału powiadomień Android 8+ (znosi limit 5 sekund)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel channel = new NotificationChannel(
+                          "audio_bg_channel",
+                          "Audio Recording Service",
+                          NotificationManager.IMPORTANCE_LOW
+                      );
+                      NotificationManager manager = getSystemService(NotificationManager.class);
+                      if (manager != null) {
+                          manager.createNotificationChannel(channel);
+                      }
+                  }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  super.onDestroy();
+                  if (wakeLock != null && wakeLock.isHeld()) {
+                      wakeLock.release();
+                  }
+              }
+          }
+          """
+          with open(path, "w") as f:
+              f.write(java_code)
+          '
+
           npx cap sync android
 
       - name: Build APK
