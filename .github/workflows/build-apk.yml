@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Capacitor Sync & Clean Native Audio Architecture
+      - name: Capacitor Sync & Inject Clean Permissions
         run: |
           npx cap add android || true
 
@@ -35,15 +35,10 @@ jobs:
           dir_path = "android/app/src/main/java/com/example/audiorecorder"
           os.makedirs(dir_path, exist_ok=True)
 
-          # 1. MainActivity.java - proszenie o uprawnienia przy starcie
+          # 1. Czysta MainActivity.java bez nakładających się zapytań przy starcie
           activity_code = """package com.example.audiorecorder;
 
-          import android.Manifest;
-          import android.content.pm.PackageManager;
-          import android.os.Build;
           import android.os.Bundle;
-          import androidx.core.app.ActivityCompat;
-          import androidx.core.content.ContextCompat;
           import com.getcapacitor.BridgeActivity;
 
           public class MainActivity extends BridgeActivity {
@@ -51,45 +46,13 @@ jobs:
               protected void onCreate(Bundle savedInstanceState) {
                   registerPlugin(AudioRecorderPlugin.class);
                   super.onCreate(savedInstanceState);
-                  checkAndRequestPermissions();
-              }
-
-              private void checkAndRequestPermissions() {
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                      String[] permissions;
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                          permissions = new String[]{
-                              Manifest.permission.RECORD_AUDIO,
-                              Manifest.permission.ACCESS_FINE_LOCATION,
-                              Manifest.permission.ACCESS_COARSE_LOCATION,
-                              Manifest.permission.POST_NOTIFICATIONS
-                          };
-                      } else {
-                          permissions = new String[]{
-                              Manifest.permission.RECORD_AUDIO,
-                              Manifest.permission.ACCESS_FINE_LOCATION,
-                              Manifest.permission.ACCESS_COARSE_LOCATION
-                          };
-                      }
-
-                      boolean missing = false;
-                      for (String p : permissions) {
-                          if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
-                              missing = true;
-                              break;
-                          }
-                      }
-                      if (missing) {
-                          ActivityCompat.requestPermissions(this, permissions, 200);
-                      }
-                  }
               }
           }
           """
           with open(os.path.join(dir_path, "MainActivity.java"), "w") as f:
               f.write(activity_code)
 
-          # 2. AudioRecorderPlugin.java
+          # 2. AudioRecorderPlugin.java - jednorazowe, czyste zapytanie o mikrofon przy kliknięciu Record
           plugin_code = """package com.example.audiorecorder;
 
           import android.Manifest;
@@ -107,17 +70,20 @@ jobs:
           @CapacitorPlugin(
               name = "NativeAudio",
               permissions = {
-                  @Permission(alias = "microphone", strings = { Manifest.permission.RECORD_AUDIO })
+                  @Permission(
+                      alias = "microphone",
+                      strings = { Manifest.permission.RECORD_AUDIO }
+                  )
               }
           )
           public class AudioRecorderPlugin extends Plugin {
 
               @PluginMethod
               public void startRecord(PluginCall call) {
-                  if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                      requestPermissionForAlias("microphone", call, "micCallback");
-                  } else {
+                  if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                       startServiceInternal(call);
+                  } else {
+                      requestPermissionForAlias("microphone", call, "micCallback");
                   }
               }
 
@@ -141,7 +107,7 @@ jobs:
                       }
                       call.resolve();
                   } catch (Exception e) {
-                      call.reject("Błąd usługi: " + e.getMessage());
+                      call.reject("Błąd uruchamiania usługi: " + e.getMessage());
                   }
               }
 
@@ -153,7 +119,7 @@ jobs:
                       getContext().startService(intent);
                       call.resolve();
                   } catch (Exception e) {
-                      call.reject("Błąd zatrzymania: " + e.getMessage());
+                      call.reject("Błąd zatrzymywania usługi: " + e.getMessage());
                   }
               }
           }
@@ -161,7 +127,7 @@ jobs:
           with open(os.path.join(dir_path, "AudioRecorderPlugin.java"), "w") as f:
               f.write(plugin_code)
 
-          # 3. AudioService.java
+          # 3. AudioService.java - natywny rejestrator
           service_code = """package com.example.audiorecorder;
 
           import android.app.Notification;
@@ -263,27 +229,33 @@ jobs:
           with open(os.path.join(dir_path, "AudioService.java"), "w") as f:
               f.write(service_code)
 
-          # 4. AndroidManifest.xml
+          # 4. Gwarantowane dopisanie wymaganych uprawnień do AndroidManifest.xml
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           with open(manifest_path, "r") as f:
               manifest = f.read()
 
-          perms = """
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-          """
-          serv = """
-              <service android:name=".AudioService" android:foregroundServiceType="microphone" android:exported="false" />
-          """
+          needed_permissions = [
+              "android.permission.RECORD_AUDIO",
+              "android.permission.MODIFY_AUDIO_SETTINGS",
+              "android.permission.ACCESS_FINE_LOCATION",
+              "android.permission.ACCESS_COARSE_LOCATION",
+              "android.permission.FOREGROUND_SERVICE",
+              "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+              "android.permission.POST_NOTIFICATIONS",
+              "android.permission.WAKE_LOCK"
+          ]
 
-          if "</manifest>" in manifest and "RECORD_AUDIO" not in manifest:
-              manifest = manifest.replace("</manifest>", f"{perms}\n</manifest>")
-          if "</application>" in manifest and "AudioService" not in manifest:
-              manifest = manifest.replace("</application>", f"{serv}\n</application>")
+          perm_tags = ""
+          for p in needed_permissions:
+              if f'name="{p}"' not in manifest:
+                  perm_tags += f'    <uses-permission android:name="{p}" />\n'
+
+          if perm_tags:
+              manifest = manifest.replace("</manifest>", f"{perm_tags}</manifest>")
+
+          if "AudioService" not in manifest:
+              service_tag = '    <service android:name=".AudioService" android:foregroundServiceType="microphone" android:exported="false" />\n'
+              manifest = manifest.replace("</application>", f"{service_tag}</application>")
 
           with open(manifest_path, "w") as f:
               f.write(manifest)

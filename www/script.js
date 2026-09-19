@@ -1,22 +1,20 @@
 async function startRecording() {
-  // 1. Jeśli aplikacja działa jako natywny plik APK na Androidzie
   if (window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       if (window.Capacitor.Plugins && window.Capacitor.Plugins.NativeAudio) {
         await window.Capacitor.Plugins.NativeAudio.startRecord();
-        console.log("Uruchomiono natywny serwis nagrywania w Javie");
+        console.log("Natywne nagrywanie w tle uruchomione");
       }
     } catch (err) {
       console.error("Błąd usługi natywnej:", err);
-      alert("Natywny błąd nagrywania: " + (err.message || err));
+      alert("Błąd: " + (err.message || err));
     }
-    return; // Zakończ funkcję - nie wywołuj navigator.mediaDevices.getUserMedia!
+    return;
   }
 
-  // 2. Jeśli aplikacja jest uruchomiona w zwykłej przeglądarce komputerowej (Cloudflare Pages)
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    console.log("Nagrywanie w przeglądarce uruchomione");
+    console.log("Strumień audio otwarty w przeglądarce");
   } catch (err) {
     alert("Błąd mikrofonu w przeglądarce: " + err.message);
   }
@@ -27,7 +25,7 @@ async function stopRecording() {
     try {
       if (window.Capacitor.Plugins && window.Capacitor.Plugins.NativeAudio) {
         await window.Capacitor.Plugins.NativeAudio.stopRecord();
-        console.log("Zatrzymano natywny serwis w Javie");
+        console.log("Natywne nagrywanie zatrzymane");
       }
     } catch (err) {
       console.error("Błąd zatrzymania:", err);
