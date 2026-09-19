@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
+      - name: Install foreground service plugin
+        run: npm install @capawesome-team/capacitor-android-foreground-service --legacy-peer-deps
+
       - name: Capacitor Sync & Inject Service Permissions
         run: |
           npx cap add android || true
@@ -46,8 +49,16 @@ jobs:
           """
           if "</manifest>" in content and "FOREGROUND_SERVICE_MICROPHONE" not in content:
               content = content.replace("</manifest>", f"{perms}\n</manifest>")
-              with open(path, "w") as f:
-                  f.write(content)
+
+          service_decl = """
+              <receiver android:name="io.capawesome.capacitorjs.plugins.foregroundservice.NotificationActionBroadcastReceiver" />
+              <service android:name="io.capawesome.capacitorjs.plugins.foregroundservice.AndroidForegroundService" android:foregroundServiceType="microphone" />
+          """
+          if "</application>" in content and "AndroidForegroundService" not in content:
+              content = content.replace("</application>", f"{service_decl}\n</application>")
+
+          with open(path, "w") as f:
+              f.write(content)
           '
 
       - name: Build APK
