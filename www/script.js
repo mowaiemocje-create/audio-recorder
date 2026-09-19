@@ -1,27 +1,26 @@
+import { MediaRecorder } from '@capacitor-community/media-recorder';
+
 async function startRecording() {
-  if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-    try {
-      if (window.Capacitor.Plugins && window.Capacitor.Plugins.NativeAudio) {
-        await window.Capacitor.Plugins.NativeAudio.startRecord();
-        console.log("Czysta rola natywna wystartowala");
-      }
-    } catch (err) {
-      console.error("Błąd usługi:", err);
-      alert("Błąd: " + (err.message || err));
-    }
-    return;
+  try {
+    // Sprawdzenie i wymuszenie uprawnień
+    await MediaRecorder.requestPermissions();
+    
+    // Rozpoczęcie natywnego nagrywania w tle
+    await MediaRecorder.startRecording({
+      fileName: 'recording_' + Date.now() + '.aac'
+    });
+    console.log("Natywne nagrywanie w tle uruchomione.");
+  } catch (err) {
+    console.error("Błąd nagrywania:", err);
+    alert("Błąd: " + (err.message || err));
   }
 }
 
 async function stopRecording() {
-  if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-    try {
-      if (window.Capacitor.Plugins && window.Capacitor.Plugins.NativeAudio) {
-        await window.Capacitor.Plugins.NativeAudio.stopRecord();
-        console.log("Natywna usługa zatrzymana");
-      }
-    } catch (err) {
-      console.error("Błąd zatrzymania:", err);
-    }
+  try {
+    const result = await MediaRecorder.stopRecording();
+    alert("Nagranie zapisane: " + result.value.recordUrl);
+  } catch (err) {
+    console.error("Błąd zatrzymania:", err);
   }
 }
