@@ -1,8 +1,6 @@
-// Oryginalne zmienne i stan aplikacji
 let isRecording = false;
 let audioChunks = [];
 
-// Funkcja wywoływana przy kliknięciu przycisku nagrywania w Twojej aplikacji
 async function toggleRecording() {
   if (!isRecording) {
     await startNativeRecording();
@@ -16,7 +14,6 @@ async function startNativeRecording() {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
 
-      // 1. Sprawdzenie i wymuszenie uprawnień systemowych Androida
       const hasPermission = await VoiceRecorder.hasAudioRecordingPermission();
       if (!hasPermission.value) {
         const requested = await VoiceRecorder.requestAudioRecordingPermission();
@@ -26,13 +23,11 @@ async function startNativeRecording() {
         }
       }
 
-      // 2. Uruchomienie natywnego serwisu w Javie (Foreground Service)
       const result = await VoiceRecorder.startRecording();
       if (result.value) {
         isRecording = true;
         console.log("Natywne nagrywanie w tle zostało uruchomione.");
         
-        // Oryginalna zmiana wyglądu przycisku / animacji
         if (typeof updateUI === "function") updateUI(true);
         if (typeof startVisualizer === "function") startVisualizer();
       }
@@ -41,7 +36,6 @@ async function startNativeRecording() {
       alert("Błąd mikrofonu: " + (err.message || err));
     }
   } else {
-    // Fallback dla zwykłej przeglądarki na komputerze
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       console.log("Strumień otwarty w przeglądarce");
