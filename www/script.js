@@ -12,14 +12,8 @@ async function startNativeRecording() {
   if (window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
-      const KeepAwake = window.Capacitor.Plugins.KeepAwake || (window.CapacitorCommunity && window.CapacitorCommunity.KeepAwake);
 
-      // Podtrzymanie pracy procesora po zablokowaniu ekranu
-      if (KeepAwake && typeof KeepAwake.keepAwake === "function") {
-        try { await KeepAwake.keepAwake(); } catch (e) { console.log("KeepAwake opt error:", e); }
-      }
-
-      // Sprawdzenie uprawnień do mikrofonu
+      // Sprawdzenie i prośba o uprawnienia do mikrofonu
       const hasPerm = await VoiceRecorder.hasAudioRecordingPermission();
       if (!hasPerm.value) {
         const req = await VoiceRecorder.requestAudioRecordingPermission();
@@ -29,7 +23,7 @@ async function startNativeRecording() {
         }
       }
 
-      // Rozpoczęcie nagrywania natywnego
+      // Start nagrywania natywnego
       const result = await VoiceRecorder.startRecording();
       if (result.value) {
         isRecording = true;
@@ -39,6 +33,8 @@ async function startNativeRecording() {
     } catch (err) {
       alert("Błąd startu nagrywania: " + JSON.stringify(err));
     }
+  } else {
+    alert("Aplikacja musi być uruchomiona jako plik APK na telefonie!");
   }
 }
 
@@ -46,19 +42,13 @@ async function stopNativeRecording() {
   if (window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
-      const KeepAwake = window.Capacitor.Plugins.KeepAwake || (window.CapacitorCommunity && window.CapacitorCommunity.KeepAwake);
-
       const result = await VoiceRecorder.stopRecording();
       isRecording = false;
-
-      if (KeepAwake && typeof KeepAwake.allowSleep === "function") {
-        try { await KeepAwake.allowSleep(); } catch (e) {}
-      }
 
       if (typeof updateUI === "function") updateUI(false);
       if (typeof stopVisualizer === "function") stopVisualizer();
 
-      alert("Nagranie zakończone i zapisane!");
+      alert("Nagranie pomyślnie zapisane!");
     } catch (err) {
       alert("Błąd zatrzymywania: " + JSON.stringify(err));
     }
