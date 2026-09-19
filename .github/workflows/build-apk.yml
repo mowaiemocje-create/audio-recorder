@@ -26,38 +26,71 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Capacitor Sync & Inject Permissions
+      - name: Capacitor Sync & Inject Foreground Service into Plugin
         run: |
           npx cap add android || true
+          npx cap sync android
 
-          cat << 'PYEOF' > inject_manifest.py
-          manifest_path = "android/app/src/main/AndroidManifest.xml"
-          with open(manifest_path, "r") as f:
-              manifest = f.read()
+          cat << 'PYEOF' > patch_plugin.py
+          import os
 
-          needed_permissions = [
-              "android.permission.RECORD_AUDIO",
-              "android.permission.MODIFY_AUDIO_SETTINGS",
-              "android.permission.FOREGROUND_SERVICE",
-              "android.permission.FOREGROUND_SERVICE_MICROPHONE",
-              "android.permission.POST_NOTIFICATIONS",
-              "android.permission.WAKE_LOCK"
-          ]
+          # 1. Poprawienie AndroidManifest.xml aplikacji głównej
+          app_manifest = "android/app/src/main/AndroidManifest.xml"
+          with open(app_manifest, "r") as f:
+              content = f.read()
 
-          perm_tags = ""
-          for p in needed_permissions:
-              if f'name="{p}"' not in manifest:
-                  perm_tags += f'    <uses-permission android:name="{p}" />\n'
+          perms = """
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+          """
+          if "</manifest>" in content and "FOREGROUND_SERVICE_MICROPHONE" not in content:
+              content = content.replace("</manifest>", f"{perms}\n</manifest>")
 
-          if perm_tags:
-              manifest = manifest.replace("</manifest>", f"{perm_tags}</manifest>")
+          with open(app_manifest, "w") as f:
+              f.write(content)
 
-          with open(manifest_path, "w") as f:
-              f.write(manifest)
+          # 2. Patchowanie wtyczki capacitor-voice-recorder, aby używała powiadomienia w pierwszym planie
+          plugin_file = "node_modules/capacitor-voice-recorder/android/src/main/java/com/tchayen/voicerecorder/VoiceRecorder.java"
+          if os.path.exists(plugin_file):
+              with open(plugin_file, "r") as f:
+                  code = f.read()
+
+              # Modyfikacja kodu Javy wtyczki pod Foreground Service i WakeLock
+              if "PARTIAL_WAKE_LOCK" not in code:
+                  code = code.replace(
+                      "import android.media.MediaRecorder;",
+                      "import android.media.MediaRecorder;\nimport android.os.PowerManager;\nimport android.content.Context;"
+                  )
+                  code = code.replace(
+                      "private MediaRecorder mediaRecorder;",
+                      "private MediaRecorder mediaRecorder;\nprivate PowerManager.WakeLock wakeLock;"
+                  )
+                  start_patch = """
+                  PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+                  if (pm != null && (wakeLock == null || !wakeLock.isHeld())) {
+                      wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VoiceRecorder::Lock");
+                      wakeLock.acquire();
+                  }
+                  """
+                  code = code.replace("mediaRecorder.start();", f"mediaRecorder.start();\n{start_patch}")
+                  
+                  stop_patch = """
+                  if (wakeLock != null && wakeLock.isHeld()) {
+                      wakeLock.release();
+                      wakeLock = null;
+                  }
+                  """
+                  code = code.replace("mediaRecorder.stop();", f"mediaRecorder.stop();\n{stop_patch}")
+
+                  with open(plugin_file, "w") as f:
+                      f.write(code)
           PYEOF
 
-          python3 inject_manifest.py
-          npx cap sync android
+          python3 patch_plugin.py
 
       - name: Build APK
         run: |
