@@ -1,40 +1,64 @@
-async function startRecording() {
+let isRecordingNative = false;
+
+async function toggleRecording() {
+  if (!isRecordingNative) {
+    await startNativeRecording();
+  } else {
+    await stopNativeRecording();
+  }
+}
+
+async function startNativeRecording() {
   if (window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
 
-      // 1. Sprawdzenie statusu uprawnień
-      const status = await VoiceRecorder.hasAudioRecordingPermission();
-      
-      if (!status.value) {
-        // 2. Wymuszenie okna dialogowego w Androidzie
+      // 1. Sprawdzenie i prośba o uprawnienia systemowe Androida
+      const hasPermission = await VoiceRecorder.hasAudioRecordingPermission();
+      if (!hasPermission.value) {
         const requested = await VoiceRecorder.requestAudioRecordingPermission();
         if (!requested.value) {
-          alert("Uprawnienie do mikrofonu jest wymagane do nagrywania.");
+          alert("Brak uprawnień do mikrofonu.");
           return;
         }
       }
 
-      // 3. Rozpoczęcie nagrywania w tle
-      await VoiceRecorder.startRecording();
-      console.log("Natywne nagrywanie w tle zostało uruchomione.");
+      // 2. Wywołanie czystego, natywnego rejestratora w Javie (Foreground Service)
+      const result = await VoiceRecorder.startRecording();
+      if (result.value) {
+        isRecordingNative = true;
+        console.log("Natywne nagrywanie w Javie (Foreground Service) zostało uruchomione.");
+        updateUI(true);
+      }
     } catch (err) {
-      console.error("Błąd nagrywania:", err);
-      alert("Błąd mikrofonu: " + (err.message || err));
+      console.error("Błąd uruchamiania natywnego nagrywania:", err);
+      alert("Błąd nagrywania natywnego: " + (err.message || err));
     }
-    return;
+  } else {
+    alert("Natywne nagrywanie w tle wymaga uruchomienia na telefonie Android.");
   }
 }
 
-async function stopRecording() {
+async function stopNativeRecording() {
   if (window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
       const result = await VoiceRecorder.stopRecording();
-      console.log("Nagranie zakończone:", result.value);
-      alert("Nagranie zostało pomyślnie zapisane!");
+      isRecordingNative = false;
+      updateUI(false);
+      
+      console.log("Nagranie natywne zakończone sukcesem:", result.value);
+      alert("Nagranie natywne zostało pomyślnie zapisane!");
     } catch (err) {
-      console.error("Błąd zatrzymania:", err);
+      console.error("Błąd zatrzymywania natywnego nagrywania:", err);
     }
+  }
+}
+
+function updateUI(recording) {
+  const btn = document.getElementById("recordBtn") || document.querySelector("button");
+  if (btn) {
+    btn.innerText = recording ? "Stop Recording" : "Start Recording";
+    btn.style.backgroundColor = recording ? "#dc3545" : "#28a745";
   }
 }
