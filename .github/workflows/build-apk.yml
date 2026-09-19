@@ -26,14 +26,14 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Capacitor Sync & Inject Foreground Service Permissions
+      - name: Capacitor Sync & Inject Service Permissions
         run: |
           npx cap add android || true
           npx cap sync android
 
-          cat << 'PYEOF' > patch_manifest.py
-          app_manifest = "android/app/src/main/AndroidManifest.xml"
-          with open(app_manifest, "r") as f:
+          python3 -c '
+          path = "android/app/src/main/AndroidManifest.xml"
+          with open(path, "r") as f:
               content = f.read()
 
           perms = """
@@ -44,22 +44,11 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
           """
-          
-          if "FOREGROUND_SERVICE_MICROPHONE" not in content:
+          if "</manifest>" in content and "FOREGROUND_SERVICE_MICROPHONE" not in content:
               content = content.replace("</manifest>", f"{perms}\n</manifest>")
-
-          # Wymuszenie flagi foregroundServiceType="microphone" dla usługi nagrywania
-          if 'android:name="com.getcapacitor.community.speechrecognition.SpeechRecognition"' in content:
-              content = content.replace(
-                  'android:name="com.getcapacitor.community.speechrecognition.SpeechRecognition"',
-                  'android:name="com.getcapacitor.community.speechrecognition.SpeechRecognition" android:foregroundServiceType="microphone"'
-              )
-
-          with open(app_manifest, "w") as f:
-              f.write(content)
-          PYEOF
-
-          python3 patch_manifest.py
+              with open(path, "w") as f:
+                  f.write(content)
+          '
 
       - name: Build APK
         run: |
