@@ -26,16 +26,17 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Capacitor Sync & Inject Clean Permissions
+      - name: Capacitor Sync & Inject Native Code
         run: |
           npx cap add android || true
 
-          python3 -c '
+          cat << 'PYEOF' > inject_code.py
           import os
+
           dir_path = "android/app/src/main/java/com/example/audiorecorder"
           os.makedirs(dir_path, exist_ok=True)
 
-          # 1. Czysta MainActivity.java bez nakładających się zapytań przy starcie
+          # 1. MainActivity.java
           activity_code = """package com.example.audiorecorder;
 
           import android.os.Bundle;
@@ -52,7 +53,7 @@ jobs:
           with open(os.path.join(dir_path, "MainActivity.java"), "w") as f:
               f.write(activity_code)
 
-          # 2. AudioRecorderPlugin.java - jednorazowe, czyste zapytanie o mikrofon przy kliknięciu Record
+          # 2. AudioRecorderPlugin.java
           plugin_code = """package com.example.audiorecorder;
 
           import android.Manifest;
@@ -127,7 +128,7 @@ jobs:
           with open(os.path.join(dir_path, "AudioRecorderPlugin.java"), "w") as f:
               f.write(plugin_code)
 
-          # 3. AudioService.java - natywny rejestrator
+          # 3. AudioService.java
           service_code = """package com.example.audiorecorder;
 
           import android.app.Notification;
@@ -229,7 +230,7 @@ jobs:
           with open(os.path.join(dir_path, "AudioService.java"), "w") as f:
               f.write(service_code)
 
-          # 4. Gwarantowane dopisanie wymaganych uprawnień do AndroidManifest.xml
+          # 4. AndroidManifest.xml
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           with open(manifest_path, "r") as f:
               manifest = f.read()
@@ -259,8 +260,9 @@ jobs:
 
           with open(manifest_path, "w") as f:
               f.write(manifest)
-          '
+          PYEOF
 
+          python3 inject_code.py
           npx cap sync android
 
       - name: Build APK
