@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Capacitor Sync & Inject Permissions
+      - name: Capacitor Sync & Inject Foreground Service Permissions
         run: |
           npx cap add android || true
           npx cap sync android
@@ -44,8 +44,16 @@ jobs:
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
           """
-          if "</manifest>" in content and "FOREGROUND_SERVICE_MICROPHONE" not in content:
+          
+          if "FOREGROUND_SERVICE_MICROPHONE" not in content:
               content = content.replace("</manifest>", f"{perms}\n</manifest>")
+
+          # Wymuszenie flagi foregroundServiceType="microphone" dla usługi nagrywania
+          if 'android:name="com.getcapacitor.community.speechrecognition.SpeechRecognition"' in content:
+              content = content.replace(
+                  'android:name="com.getcapacitor.community.speechrecognition.SpeechRecognition"',
+                  'android:name="com.getcapacitor.community.speechrecognition.SpeechRecognition" android:foregroundServiceType="microphone"'
+              )
 
           with open(app_manifest, "w") as f:
               f.write(content)
