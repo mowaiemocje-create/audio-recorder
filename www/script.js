@@ -12,24 +12,24 @@ async function startNativeRecording() {
   if (window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
-      const KeepAwake = window.Capacitor.Plugins.KeepAwake;
+      const KeepAwake = window.Capacitor.Plugins.KeepAwake || (window.CapacitorCommunity && window.CapacitorCommunity.KeepAwake);
 
-      // 1. Zapobiegaj uśpieniu procesora po wygaszeniu ekranu
-      if (KeepAwake) {
-        await KeepAwake.keepAwake();
+      // Podtrzymanie pracy procesora po zablokowaniu ekranu
+      if (KeepAwake && typeof KeepAwake.keepAwake === "function") {
+        try { await KeepAwake.keepAwake(); } catch (e) { console.log("KeepAwake opt error:", e); }
       }
 
-      // 2. Sprawdź uprawnienia do mikrofonu
+      // Sprawdzenie uprawnień do mikrofonu
       const hasPerm = await VoiceRecorder.hasAudioRecordingPermission();
       if (!hasPerm.value) {
         const req = await VoiceRecorder.requestAudioRecordingPermission();
         if (!req.value) {
-          alert("Brak zgody na mikrofon.");
+          alert("Brak zgody na mikrofon w systemie Android.");
           return;
         }
       }
 
-      // 3. Rozpocznij nagrywanie natywne
+      // Rozpoczęcie nagrywania natywnego
       const result = await VoiceRecorder.startRecording();
       if (result.value) {
         isRecording = true;
@@ -46,14 +46,13 @@ async function stopNativeRecording() {
   if (window.Capacitor && window.Capacitor.isNativePlatform()) {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
-      const KeepAwake = window.Capacitor.Plugins.KeepAwake;
+      const KeepAwake = window.Capacitor.Plugins.KeepAwake || (window.CapacitorCommunity && window.CapacitorCommunity.KeepAwake);
 
       const result = await VoiceRecorder.stopRecording();
       isRecording = false;
 
-      // Zezwól na ponowne usypianie urządzenia
-      if (KeepAwake) {
-        await KeepAwake.allowSleep();
+      if (KeepAwake && typeof KeepAwake.allowSleep === "function") {
+        try { await KeepAwake.allowSleep(); } catch (e) {}
       }
 
       if (typeof updateUI === "function") updateUI(false);
