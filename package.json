@@ -6,8 +6,8 @@
     "cap:sync": "cap sync"
   },
   "dependencies": {
-    "@capacitor/core": "^7.0.0",
     "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
     "capacitor-voice-recorder": "^6.1.0"
   },
   "devDependencies": {

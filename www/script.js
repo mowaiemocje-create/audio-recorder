@@ -9,59 +9,60 @@ async function toggleRecording() {
 }
 
 async function startNativeRecording() {
-  if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-    try {
-      const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
+  // Wymuszamy sprawdzenie obecności natywnej wtyczki
+  if (!window.Capacitor || !window.Capacitor.isNativePlatform()) {
+    alert("BŁĄD: Aplikacja uruchomiła się w trybie przeglądarkowym, a nie natywnym Androidzie!");
+    return;
+  }
 
-      // 1. Sprawdź i zażądaj uprawnień do mikrofonu i powiadomień
-      const hasMicPerm = await VoiceRecorder.hasAudioRecordingPermission();
-      if (!hasMicPerm.value) {
-        const reqMic = await VoiceRecorder.requestAudioRecordingPermission();
-        if (!reqMic.value) {
-          alert("Brak uprawnień do mikrofonu.");
-          return;
-        }
-      }
+  const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
 
-      // 2. Włącz nagrywanie natywne
-      const result = await VoiceRecorder.startRecording();
-      if (result.value) {
-        isRecording = true;
-        console.log("Natywne nagrywanie w tle uruchomione.");
-        if (typeof updateUI === "function") updateUI(true);
-        if (typeof startVisualizer === "function") startVisualizer();
+  if (!VoiceRecorder) {
+    alert("BŁĄD: Wtyczka VoiceRecorder nie została załadowana w Androidzie.");
+    return;
+  }
+
+  try {
+    // Sprawdzenie i prośba o uprawnienia
+    const hasPerm = await VoiceRecorder.hasAudioRecordingPermission();
+    if (!hasPerm.value) {
+      const req = await VoiceRecorder.requestAudioRecordingPermission();
+      if (!req.value) {
+        alert("Brak zgody na mikrofon w systemie Android.");
+        return;
       }
-    } catch (err) {
-      console.error("Błąd natywnego nagrywania:", err);
-      alert("Błąd mikrofonu: " + (err.message || err));
     }
-  } else {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    // Start natywnego nagrywania
+    const startResult = await VoiceRecorder.startRecording();
+    if (startResult.value) {
       isRecording = true;
+      console.log("Natywne nagrywanie rozpoczęte.");
       if (typeof updateUI === "function") updateUI(true);
-    } catch (err) {
-      alert("Błąd mikrofonu: " + err.message);
+      if (typeof startVisualizer === "function") startVisualizer();
+    } else {
+      alert("Nie udało się uruchomić natywnego nagrywania.");
     }
+  } catch (err) {
+    console.error("Błąd podczas startu nagrywania:", err);
+    alert("Błąd natywny: " + JSON.stringify(err));
   }
 }
 
 async function stopNativeRecording() {
-  if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-    try {
-      const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
-      const result = await VoiceRecorder.stopRecording();
-      isRecording = false;
-      
-      if (typeof updateUI === "function") updateUI(false);
-      if (typeof stopVisualizer === "function") stopVisualizer();
+  if (!window.Capacitor || !window.Capacitor.isNativePlatform()) return;
 
-      alert("Nagranie zakończone i zapisane!");
-    } catch (err) {
-      console.error("Błąd zatrzymywania nagrywania:", err);
-    }
-  } else {
+  try {
+    const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
+    const result = await VoiceRecorder.stopRecording();
     isRecording = false;
+
     if (typeof updateUI === "function") updateUI(false);
+    if (typeof stopVisualizer === "function") stopVisualizer();
+
+    alert("Nagranie zapisane pomyślnie w pamięci natywnej!");
+  } catch (err) {
+    console.error("Błąd zatrzymywania nagrania:", err);
+    alert("Błąd podczas zatrzymywania: " + JSON.stringify(err));
   }
 }
