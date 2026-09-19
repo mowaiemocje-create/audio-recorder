@@ -26,17 +26,79 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Install foreground service plugin
-        run: npm install @capawesome-team/capacitor-android-foreground-service --legacy-peer-deps
-
-      - name: Capacitor Sync & Inject Service Permissions
+      - name: Capacitor Sync
         run: |
           npx cap add android || true
           npx cap sync android
 
+      - name: Copy custom native recording service
+        run: |
+          mkdir -p android/app/src/main/java/com/pitchrec/backgroundrecorder
+          cp native/BackgroundRecorderPlugin.kt android/app/src/main/java/com/pitchrec/backgroundrecorder/
+          cp native/BackgroundRecorderService.kt android/app/src/main/java/com/pitchrec/backgroundrecorder/
+
+      - name: Register plugin, add manifest permissions and service declaration
+        run: |
           python3 -c '
-          path = "android/app/src/main/AndroidManifest.xml"
-          with open(path, "r") as f:
+          import re, glob
+
+          candidates = glob.glob("android/app/src/main/java/**/MainActivity.java", recursive=True) + \
+                       glob.glob("android/app/src/main/java/**/MainActivity.kt", recursive=True)
+          if not candidates:
+              raise SystemExit("MainActivity nie znalezione — sprawdź strukturę projektu")
+          main_activity_path = candidates[0]
+          with open(main_activity_path, "r") as f:
+              content = f.read()
+
+          is_kotlin = main_activity_path.endswith(".kt")
+          import_line = ("import com.pitchrec.backgroundrecorder.BackgroundRecorderPlugin" if is_kotlin
+                         else "import com.pitchrec.backgroundrecorder.BackgroundRecorderPlugin;")
+          register_call = ("registerPlugin(BackgroundRecorderPlugin::class.java)" if is_kotlin
+                            else "registerPlugin(BackgroundRecorderPlugin.class);")
+
+          if "BackgroundRecorderPlugin" not in content:
+              lines = content.split("\n")
+              import_indices = [i for i, l in enumerate(lines) if l.strip().startswith("import ")]
+              if import_indices:
+                  lines.insert(max(import_indices) + 1, import_line)
+              else:
+                  pkg_idx = next(i for i, l in enumerate(lines) if l.strip().startswith("package "))
+                  lines.insert(pkg_idx + 1, "")
+                  lines.insert(pkg_idx + 2, import_line)
+              content = "\n".join(lines)
+
+              onCreatePattern = (r"override fun onCreate\([^)]*\)\s*\{" if is_kotlin
+                                 else r"protected void onCreate\([^)]*\)\s*\{")
+              if re.search(onCreatePattern, content):
+                  content = re.sub(onCreatePattern, lambda m: m.group(0) + "\n        " + register_call, content, count=1)
+              else:
+                  class_pattern = (r"(class MainActivity\s*:\s*BridgeActivity\(\)\s*\{)" if is_kotlin
+                                    else r"(public class MainActivity extends BridgeActivity\s*\{)")
+                  if is_kotlin:
+                      new_method = (
+                          "\n    override fun onCreate(savedInstanceState: android.os.Bundle?) {\n"
+                          "        " + register_call + "\n"
+                          "        super.onCreate(savedInstanceState)\n"
+                          "    }\n"
+                      )
+                  else:
+                      new_method = (
+                          "\n    @Override\n"
+                          "    protected void onCreate(android.os.Bundle savedInstanceState) {\n"
+                          "        " + register_call + "\n"
+                          "        super.onCreate(savedInstanceState);\n"
+                          "    }\n"
+                      )
+                  if re.search(class_pattern, content):
+                      content = re.sub(class_pattern, r"\1" + new_method, content, count=1)
+                  else:
+                      raise SystemExit("Nie znaleziono deklaracji klasy MainActivity - sprawdź ręcznie")
+
+          with open(main_activity_path, "w") as f:
+              f.write(content)
+
+          manifest_path = "android/app/src/main/AndroidManifest.xml"
+          with open(manifest_path, "r") as f:
               content = f.read()
 
           perms = """
@@ -51,14 +113,16 @@ jobs:
               content = content.replace("</manifest>", f"{perms}\n</manifest>")
 
           service_decl = """
-              <receiver android:name="io.capawesome.capacitorjs.plugins.foregroundservice.NotificationActionBroadcastReceiver" />
-              <service android:name="io.capawesome.capacitorjs.plugins.foregroundservice.AndroidForegroundService" android:foregroundServiceType="microphone" />
+              <service android:name="com.pitchrec.backgroundrecorder.BackgroundRecorderService" android:foregroundServiceType="microphone" android:exported="false" />
           """
-          if "</application>" in content and "AndroidForegroundService" not in content:
+          if "</application>" in content and "BackgroundRecorderService" not in content:
               content = content.replace("</application>", f"{service_decl}\n</application>")
 
-          with open(path, "w") as f:
+          with open(manifest_path, "w") as f:
               f.write(content)
+
+          print("MainActivity poprawione:", main_activity_path)
+          print("Manifest poprawiony:", manifest_path)
           '
 
       - name: Build APK
