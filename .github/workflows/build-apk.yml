@@ -26,84 +26,191 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Capacitor Sync & Inject Native Background Lock
+      - name: Capacitor Sync & Inject Pure Native Service
         run: |
           npx cap add android || true
 
-          # 1. Wstrzyknięcie uprawnień do AndroidManifest.xml
+          # 1. Zapis natywnej usługi nagrywania AudioService.java
           python3 -c '
-          path = "android/app/src/main/AndroidManifest.xml"
-          with open(path, "r") as f:
-              content = f.read()
+          import os
+          dir_path = "android/app/src/main/java/com/example/audiorecorder"
+          os.makedirs(dir_path, exist_ok=True)
 
-          permissions = """
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-              <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <uses-permission android:name="android.permission.WAKE_LOCK" />
-              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-          """
+          service_code = """package com.example.audiorecorder;
 
-          if "</manifest>" in content and "RECORD_AUDIO" not in content:
-              content = content.replace("</manifest>", f"{permissions}\n</manifest>")
-
-          with open(path, "w") as f:
-              f.write(content)
-          '
-
-          # 2. Wstrzyknięcie natywnej blokady uśpienia (WakeLock) z poprawną widocznością public
-          python3 -c '
-          path = "android/app/src/main/java/com/example/audiorecorder/MainActivity.java"
-          java_code = """package com.example.audiorecorder;
-
-          import android.os.Bundle;
-          import android.os.PowerManager;
+          import android.app.Notification;
           import android.app.NotificationChannel;
           import android.app.NotificationManager;
+          import android.app.Service;
+          import android.content.Intent;
+          import android.content.pm.ServiceInfo;
+          import android.media.MediaRecorder;
           import android.os.Build;
-          import com.getcapacitor.BridgeActivity;
+          import android.os.IBinder;
+          import androidx.core.app.NotificationCompat;
+          import java.io.File;
 
-          public class MainActivity extends BridgeActivity {
-              private PowerManager.WakeLock wakeLock;
+          public class AudioService extends Service {
+              private static final String CHANNEL_ID = "audio_bg_channel";
+              private static final int NOTIFICATION_ID = 1001;
+              private MediaRecorder recorder;
 
               @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
+              public void onCreate() {
+                  super.onCreate();
+                  createNotificationChannel();
+              }
 
-                  PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
-                  if (powerManager != null) {
-                      wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AudioRecorder::WakeLock");
-                      wakeLock.acquire();
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  String action = intent != null ? intent.getAction() : null;
+                  if ("START".equals(action)) {
+                      startForegroundServiceWithNotification();
+                      startNativeRecording();
+                  } else if ("STOP".equals(action)) {
+                      stopNativeRecording();
+                      stopForeground(true);
+                      stopSelf();
                   }
+                  return START_NOT_STICKY;
+              }
 
+              private void startForegroundServiceWithNotification() {
+                  Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
+                          .setContentTitle("Nagrywanie w tle")
+                          .setContentText("Dyktafon rejestruje dźwięk...")
+                          .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                          .setPriority(NotificationCompat.PRIORITY_LOW)
+                          .build();
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+                  } else {
+                      startForeground(NOTIFICATION_ID, notification);
+                  }
+              }
+
+              private void createNotificationChannel() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       NotificationChannel channel = new NotificationChannel(
-                          "audio_bg_channel",
-                          "Audio Recording Service",
-                          NotificationManager.IMPORTANCE_LOW
+                              CHANNEL_ID,
+                              "Audio Service",
+                              NotificationManager.IMPORTANCE_LOW
                       );
                       NotificationManager manager = getSystemService(NotificationManager.class);
-                      if (manager != null) {
-                          manager.createNotificationChannel(channel);
+                      if (manager != null) manager.createNotificationChannel(channel);
+                  }
+              }
+
+              private void startNativeRecording() {
+                  try {
+                      File file = new File(getExternalFilesDir(null), "recording.m4a");
+                      recorder = new MediaRecorder();
+                      recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+                      recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+                      recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+                      recorder.setOutputFile(file.getAbsolutePath());
+                      recorder.prepare();
+                      recorder.start();
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
+              }
+
+              private void stopNativeRecording() {
+                  if (recorder != null) {
+                      try {
+                          recorder.stop();
+                      } catch (Exception e) {
+                          e.printStackTrace();
                       }
+                      recorder.release();
+                      recorder = null;
                   }
               }
 
               @Override
-              public void onDestroy() {
-                  super.onDestroy();
-                  if (wakeLock != null && wakeLock.isHeld()) {
-                      wakeLock.release();
+              public IBinder onBind(Intent intent) { return null; }
+          }
+          """
+          with open(os.path.join(dir_path, "AudioService.java"), "w") as f:
+              f.write(service_code)
+
+          # 2. Zapis wtyczki Capacitora AudioRecorderPlugin.java
+          plugin_code = """package com.example.audiorecorder;
+
+          import android.content.Intent;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          @CapacitorPlugin(name = "NativeAudio")
+          public class AudioRecorderPlugin extends Plugin {
+
+              @PluginMethod
+              public void startRecord(PluginCall call) {
+                  Intent intent = new Intent(getContext(), AudioService.class);
+                  intent.setAction("START");
+                  if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                      getContext().startForegroundService(intent);
+                  } else {
+                      getContext().startService(intent);
                   }
+                  call.resolve();
+              }
+
+              @PluginMethod
+              public void stopRecord(PluginCall call) {
+                  Intent intent = new Intent(getContext(), AudioService.class);
+                  intent.setAction("STOP");
+                  getContext().startService(intent);
+                  call.resolve();
               }
           }
           """
-          with open(path, "w") as f:
-              f.write(java_code)
+          with open(os.path.join(dir_path, "AudioRecorderPlugin.java"), "w") as f:
+              f.write(plugin_code)
+
+          # 3. Zapis MainActivity.java z rejestracją wtyczki
+          activity_code = """package com.example.audiorecorder;
+
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  registerPlugin(AudioRecorderPlugin.class);
+                  super.onCreate(savedInstanceState);
+              }
+          }
+          """
+          with open(os.path.join(dir_path, "MainActivity.java"), "w") as f:
+              f.write(activity_code)
+
+          # 4. Aktualizacja AndroidManifest.xml
+          manifest_path = "android/app/src/main/AndroidManifest.xml"
+          with open(manifest_path, "r") as f:
+              manifest = f.read()
+
+          perms = """
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+          """
+          serv = """
+              <service android:name=".AudioService" android:foregroundServiceType="microphone" android:exported="false" />
+          """
+
+          if "</manifest>" in manifest and "RECORD_AUDIO" not in manifest:
+              manifest = manifest.replace("</manifest>", f"{perms}\n</manifest>")
+          if "</application>" in manifest and "AudioService" not in manifest:
+              manifest = manifest.replace("</application>", f"{serv}\n</application>")
+
+          with open(manifest_path, "w") as f:
+              f.write(manifest)
           '
 
           npx cap sync android
