@@ -1,7 +1,10 @@
-let isRecordingNative = false;
+// Oryginalne zmienne i stan aplikacji
+let isRecording = false;
+let audioChunks = [];
 
+// Funkcja wywoływana przy kliknięciu przycisku nagrywania w Twojej aplikacji
 async function toggleRecording() {
-  if (!isRecordingNative) {
+  if (!isRecording) {
     await startNativeRecording();
   } else {
     await stopNativeRecording();
@@ -13,7 +16,7 @@ async function startNativeRecording() {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
 
-      // 1. Sprawdzenie i prośba o uprawnienia systemowe Androida
+      // 1. Sprawdzenie i wymuszenie uprawnień systemowych Androida
       const hasPermission = await VoiceRecorder.hasAudioRecordingPermission();
       if (!hasPermission.value) {
         const requested = await VoiceRecorder.requestAudioRecordingPermission();
@@ -23,19 +26,30 @@ async function startNativeRecording() {
         }
       }
 
-      // 2. Wywołanie czystego, natywnego rejestratora w Javie (Foreground Service)
+      // 2. Uruchomienie natywnego serwisu w Javie (Foreground Service)
       const result = await VoiceRecorder.startRecording();
       if (result.value) {
-        isRecordingNative = true;
-        console.log("Natywne nagrywanie w Javie (Foreground Service) zostało uruchomione.");
-        updateUI(true);
+        isRecording = true;
+        console.log("Natywne nagrywanie w tle zostało uruchomione.");
+        
+        // Oryginalna zmiana wyglądu przycisku / animacji
+        if (typeof updateUI === "function") updateUI(true);
+        if (typeof startVisualizer === "function") startVisualizer();
       }
     } catch (err) {
-      console.error("Błąd uruchamiania natywnego nagrywania:", err);
-      alert("Błąd nagrywania natywnego: " + (err.message || err));
+      console.error("Błąd natywnego nagrywania:", err);
+      alert("Błąd mikrofonu: " + (err.message || err));
     }
   } else {
-    alert("Natywne nagrywanie w tle wymaga uruchomienia na telefonie Android.");
+    // Fallback dla zwykłej przeglądarki na komputerze
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log("Strumień otwarty w przeglądarce");
+      isRecording = true;
+      if (typeof updateUI === "function") updateUI(true);
+    } catch (err) {
+      alert("Błąd mikrofonu w przeglądarce: " + err.message);
+    }
   }
 }
 
@@ -44,21 +58,18 @@ async function stopNativeRecording() {
     try {
       const VoiceRecorder = window.Capacitor.Plugins.VoiceRecorder;
       const result = await VoiceRecorder.stopRecording();
-      isRecordingNative = false;
-      updateUI(false);
+      isRecording = false;
       
-      console.log("Nagranie natywne zakończone sukcesem:", result.value);
-      alert("Nagranie natywne zostało pomyślnie zapisane!");
+      if (typeof updateUI === "function") updateUI(false);
+      if (typeof stopVisualizer === "function") stopVisualizer();
+
+      console.log("Nagranie zakończone:", result.value);
+      alert("Nagranie pomyślnie zapisane!");
     } catch (err) {
       console.error("Błąd zatrzymywania natywnego nagrywania:", err);
     }
-  }
-}
-
-function updateUI(recording) {
-  const btn = document.getElementById("recordBtn") || document.querySelector("button");
-  if (btn) {
-    btn.innerText = recording ? "Stop Recording" : "Start Recording";
-    btn.style.backgroundColor = recording ? "#dc3545" : "#28a745";
+  } else {
+    isRecording = false;
+    if (typeof updateUI === "function") updateUI(false);
   }
 }

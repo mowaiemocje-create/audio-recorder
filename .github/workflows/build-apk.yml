@@ -26,15 +26,12 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Capacitor Sync & Inject Foreground Service into Plugin
+      - name: Capacitor Sync & Inject Permissions
         run: |
           npx cap add android || true
           npx cap sync android
 
-          cat << 'PYEOF' > patch_plugin.py
-          import os
-
-          # 1. Poprawienie AndroidManifest.xml aplikacji głównej
+          cat << 'PYEOF' > patch_manifest.py
           app_manifest = "android/app/src/main/AndroidManifest.xml"
           with open(app_manifest, "r") as f:
               content = f.read()
@@ -52,45 +49,9 @@ jobs:
 
           with open(app_manifest, "w") as f:
               f.write(content)
-
-          # 2. Patchowanie wtyczki capacitor-voice-recorder, aby używała powiadomienia w pierwszym planie
-          plugin_file = "node_modules/capacitor-voice-recorder/android/src/main/java/com/tchayen/voicerecorder/VoiceRecorder.java"
-          if os.path.exists(plugin_file):
-              with open(plugin_file, "r") as f:
-                  code = f.read()
-
-              # Modyfikacja kodu Javy wtyczki pod Foreground Service i WakeLock
-              if "PARTIAL_WAKE_LOCK" not in code:
-                  code = code.replace(
-                      "import android.media.MediaRecorder;",
-                      "import android.media.MediaRecorder;\nimport android.os.PowerManager;\nimport android.content.Context;"
-                  )
-                  code = code.replace(
-                      "private MediaRecorder mediaRecorder;",
-                      "private MediaRecorder mediaRecorder;\nprivate PowerManager.WakeLock wakeLock;"
-                  )
-                  start_patch = """
-                  PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-                  if (pm != null && (wakeLock == null || !wakeLock.isHeld())) {
-                      wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VoiceRecorder::Lock");
-                      wakeLock.acquire();
-                  }
-                  """
-                  code = code.replace("mediaRecorder.start();", f"mediaRecorder.start();\n{start_patch}")
-                  
-                  stop_patch = """
-                  if (wakeLock != null && wakeLock.isHeld()) {
-                      wakeLock.release();
-                      wakeLock = null;
-                  }
-                  """
-                  code = code.replace("mediaRecorder.stop();", f"mediaRecorder.stop();\n{stop_patch}")
-
-                  with open(plugin_file, "w") as f:
-                      f.write(code)
           PYEOF
 
-          python3 patch_plugin.py
+          python3 patch_manifest.py
 
       - name: Build APK
         run: |
