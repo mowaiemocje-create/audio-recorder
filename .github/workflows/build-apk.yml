@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Capacitor Sync & Fix WebView & System Permissions
+      - name: Capacitor Sync & Fix Localhost WebView Permissions
         run: |
           npx cap add android || true
 
@@ -35,17 +35,15 @@ jobs:
           dir_path = "android/app/src/main/java/com/example/audiorecorder"
           os.makedirs(dir_path, exist_ok=True)
 
-          # 1. MainActivity.java z odblokowaniem mikrofonu w WebView (WebChromeClient)
+          # 1. MainActivity.java - przyznawanie uprawnień w WebView dla localhost
           activity_code = """package com.example.audiorecorder;
 
           import android.Manifest;
-          import android.content.pm.PackageManager;
           import android.os.Build;
           import android.os.Bundle;
           import android.webkit.PermissionRequest;
           import android.webkit.WebChromeClient;
           import androidx.core.app.ActivityCompat;
-          import androidx.core.content.ContextCompat;
           import com.getcapacitor.BridgeActivity;
 
           public class MainActivity extends BridgeActivity {
@@ -54,12 +52,12 @@ jobs:
                   registerPlugin(AudioRecorderPlugin.class);
                   super.onCreate(savedInstanceState);
 
-                  // Odblokowanie dostępu do mikrofonu dla silnika WebView
+                  // Odblokowanie mikrofonu bezpośrednio w silniku WebView dla adresów localhost
                   if (this.bridge != null && this.bridge.getWebView() != null) {
                       this.bridge.getWebView().setWebChromeClient(new WebChromeClient() {
                           @Override
                           public void onPermissionRequest(final PermissionRequest request) {
-                              request.grant(request.getResources());
+                              runOnUiThread(() -> request.grant(request.getResources()));
                           }
                       });
                   }
@@ -92,39 +90,50 @@ jobs:
           with open(os.path.join(dir_path, "MainActivity.java"), "w") as f:
               f.write(activity_code)
 
-          # 2. AudioRecorderPlugin.java
+          # 2. AudioRecorderPlugin.java z poprawnym asynchronicznym powiadomieniem
           plugin_code = """package com.example.audiorecorder;
 
           import android.Manifest;
           import android.content.Intent;
-          import android.content.pm.PackageManager;
           import android.os.Build;
-          import androidx.core.app.ActivityCompat;
-          import androidx.core.content.ContextCompat;
+          import com.getcapacitor.PermissionState;
           import com.getcapacitor.Plugin;
           import com.getcapacitor.PluginCall;
           import com.getcapacitor.PluginMethod;
           import com.getcapacitor.annotation.CapacitorPlugin;
+          import com.getcapacitor.annotation.Permission;
+          import com.getcapacitor.annotation.PermissionCallback;
 
-          @CapacitorPlugin(name = "NativeAudio")
+          @CapacitorPlugin(
+              name = "NativeAudio",
+              permissions = {
+                  @Permission(
+                      alias = "microphone",
+                      strings = { Manifest.permission.RECORD_AUDIO }
+                  )
+              }
+          )
           public class AudioRecorderPlugin extends Plugin {
 
               @PluginMethod
               public void startRecord(PluginCall call) {
-                  boolean micGranted = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-
-                  if (!micGranted) {
-                      if (getActivity() != null) {
-                          ActivityCompat.requestPermissions(
-                              getActivity(),
-                              new String[]{ Manifest.permission.RECORD_AUDIO },
-                              101
-                          );
-                      }
-                      call.reject("Uprawnienie do mikrofonu wymagane. Kliknij Record ponownie.");
-                      return;
+                  if (getPermissionState("microphone") == PermissionState.GRANTED) {
+                      startServiceInternal(call);
+                  } else {
+                      requestPermissionForAlias("microphone", call, "checkMicCallback");
                   }
+              }
 
+              @PermissionCallback
+              private void checkMicCallback(PluginCall call) {
+                  if (getPermissionState("microphone") == PermissionState.GRANTED) {
+                      startServiceInternal(call);
+                  } else {
+                      call.reject("Uprawnienie do mikrofonu zostało odrzucone.");
+                  }
+              }
+
+              private void startServiceInternal(PluginCall call) {
                   try {
                       Intent intent = new Intent(getContext(), AudioService.class);
                       intent.setAction("START");
@@ -135,7 +144,7 @@ jobs:
                       }
                       call.resolve();
                   } catch (Exception e) {
-                      call.reject("Błąd uruchamiania usługi: " + e.getMessage());
+                      call.reject("Błąd usługi: " + e.getMessage());
                   }
               }
 
@@ -147,7 +156,7 @@ jobs:
                       getContext().startService(intent);
                       call.resolve();
                   } catch (Exception e) {
-                      call.reject("Błąd zatrzymywania usługi: " + e.getMessage());
+                      call.reject("Błąd zatrzymania: " + e.getMessage());
                   }
               }
           }

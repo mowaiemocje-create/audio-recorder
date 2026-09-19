@@ -1,19 +1,25 @@
 async function startRecording() {
-  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeAudio) {
+  if (window.Capacitor && window.Capacitor.isNativePlatform() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeAudio) {
     try {
       await window.Capacitor.Plugins.NativeAudio.startRecord();
       console.log("Natywne nagrywanie w tle uruchomione");
+      return;
     } catch (err) {
-      console.error("Błąd nagrywania natywnego:", err);
-      alert("Błąd: " + (err.message || err));
+      console.warn("Błąd wtyczki natywnej:", err);
     }
-  } else {
-    alert("Wersja przeglądarkowa – przetestuj na pliku APK w telefonie");
+  }
+
+  // Fallback dla czystego JavaScript w przeglądarce
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log("Strumień mikrofonu otwarty w WebView");
+  } catch (err) {
+    console.error("Błąd mikrofonu WebView:", err);
   }
 }
 
 async function stopRecording() {
-  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeAudio) {
+  if (window.Capacitor && window.Capacitor.isNativePlatform() && window.Capacitor.Plugins && window.Capacitor.Plugins.NativeAudio) {
     try {
       await window.Capacitor.Plugins.NativeAudio.stopRecord();
       console.log("Natywne nagrywanie zatrzymane");
