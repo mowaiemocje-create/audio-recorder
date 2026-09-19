@@ -26,7 +26,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Capacitor Sync & Inject Native Code
+      - name: Capacitor Sync & Inject Native WakeLock Service
         run: |
           npx cap add android || true
 
@@ -128,7 +128,7 @@ jobs:
           with open(os.path.join(dir_path, "AudioRecorderPlugin.java"), "w") as f:
               f.write(plugin_code)
 
-          # 3. AudioService.java
+          # 3. AudioService.java z blokadą WakeLock i nagrywaniem nieprzerwanie w tle
           service_code = """package com.example.audiorecorder;
 
           import android.app.Notification;
@@ -140,6 +140,7 @@ jobs:
           import android.media.MediaRecorder;
           import android.os.Build;
           import android.os.IBinder;
+          import android.os.PowerManager;
           import androidx.core.app.NotificationCompat;
           import java.io.File;
 
@@ -147,6 +148,7 @@ jobs:
               private static final String CHANNEL_ID = "audio_bg_channel";
               private static final int NOTIFICATION_ID = 1001;
               private MediaRecorder recorder;
+              private PowerManager.WakeLock wakeLock;
 
               @Override
               public void onCreate() {
@@ -158,14 +160,33 @@ jobs:
               public int onStartCommand(Intent intent, int flags, int startId) {
                   String action = intent != null ? intent.getAction() : null;
                   if ("START".equals(action)) {
+                      acquireWakeLock();
                       startForegroundServiceWithNotification();
                       startNativeRecording();
                   } else if ("STOP".equals(action)) {
                       stopNativeRecording();
+                      releaseWakeLock();
                       stopForeground(true);
                       stopSelf();
                   }
-                  return START_NOT_STICKY;
+                  return START_STICKY;
+              }
+
+              private void acquireWakeLock() {
+                  if (wakeLock == null) {
+                      PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                      if (pm != null) {
+                          wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AudioRecorder::ServiceWakeLock");
+                          wakeLock.acquire();
+                      }
+                  }
+              }
+
+              private void releaseWakeLock() {
+                  if (wakeLock != null && wakeLock.isHeld()) {
+                      wakeLock.release();
+                      wakeLock = null;
+                  }
               }
 
               private void startForegroundServiceWithNotification() {
@@ -173,6 +194,7 @@ jobs:
                           .setContentTitle("Nagrywanie w tle")
                           .setContentText("Dyktafon rejestruje dźwięk...")
                           .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                          .setOngoing(true)
                           .setPriority(NotificationCompat.PRIORITY_LOW)
                           .build();
 
@@ -225,6 +247,13 @@ jobs:
 
               @Override
               public IBinder onBind(Intent intent) { return null; }
+
+              @Override
+              public void onDestroy() {
+                  super.onDestroy();
+                  stopNativeRecording();
+                  releaseWakeLock();
+              }
           }
           """
           with open(os.path.join(dir_path, "AudioService.java"), "w") as f:
