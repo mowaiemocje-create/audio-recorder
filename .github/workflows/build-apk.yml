@@ -36,7 +36,7 @@ jobs:
           dir_path = "android/app/src/main/java/com/example/audiorecorder"
           os.makedirs(dir_path, exist_ok=True)
 
-          # 1. MainActivity.java - czysta aktywność główna
+          # 1. MainActivity.java
           activity_code = """package com.example.audiorecorder;
 
           import android.os.Bundle;
@@ -53,7 +53,7 @@ jobs:
           with open(os.path.join(dir_path, "MainActivity.java"), "w") as f:
               f.write(activity_code)
 
-          # 2. AudioRecorderPlugin.java - wtyczka wywołująca natywną usługę
+          # 2. AudioRecorderPlugin.java
           plugin_code = """package com.example.audiorecorder;
 
           import android.Manifest;
@@ -125,7 +125,7 @@ jobs:
           with open(os.path.join(dir_path, "AudioRecorderPlugin.java"), "w") as f:
               f.write(plugin_code)
 
-          # 3. AudioService.java - czysty Foreground Service z własnym wątkiem i blokadą procesora
+          # 3. AudioService.java z poprawną składnią e.printStackTrace()
           service_code = """package com.example.audiorecorder;
 
           import android.app.Notification;
@@ -266,12 +266,12 @@ jobs:
                                   }
                               }
                           } catch (Exception e) {
-                              e.printStackTrace;
+                              e.printStackTrace();
                           }
                       });
                       recordingThread.start();
                   } catch (Exception e) {
-                      e.printStackTrace;
+                      e.printStackTrace();
                   }
               }
 
@@ -283,7 +283,7 @@ jobs:
                               audioRecord.stop();
                           }
                       } catch (Exception e) {
-                          e.printStackTrace;
+                          e.printStackTrace();
                       }
                       audioRecord.release();
                       audioRecord = null;
@@ -304,7 +304,7 @@ jobs:
           with open(os.path.join(dir_path, "AudioService.java"), "w") as f:
               f.write(service_code)
 
-          # 4. Poprawny AndroidManifest.xml wpisujący usługe w system
+          # 4. Manifest
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           with open(manifest_path, "r") as f:
               manifest = f.read()
