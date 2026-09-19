@@ -31,93 +31,110 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
-      - name: Copy custom native recording service
+      - name: Inject Kotlin Support & Native Recorder Code
         run: |
+          # 1. Kopiowanie natywnych plików Kotlin do właściwej struktury pakietu
           mkdir -p android/app/src/main/java/com/pitchrec/backgroundrecorder
           cp native/BackgroundRecorderPlugin.kt android/app/src/main/java/com/pitchrec/backgroundrecorder/
           cp native/BackgroundRecorderService.kt android/app/src/main/java/com/pitchrec/backgroundrecorder/
 
-      - name: Register plugin, add manifest permissions and service declaration
-        run: |
           python3 -c '
-          import re, glob, os
+          import glob, re, os
 
+          # 2. Włączenie wtyczki Kotlin Android w android/app/build.gradle
+          gradle_path = "android/app/build.gradle"
+          if os.path.exists(gradle_path):
+              with open(gradle_path, "r") as f:
+                  g_content = f.read()
+
+              if "kotlin-android" not in g_content:
+                  if "apply plugin: '\''com.android.application'\''" in g_content:
+                      g_content = g_content.replace(
+                          "apply plugin: '\''com.android.application'\''",
+                          "apply plugin: '\''com.android.application'\''\napply plugin: '\''kotlin-android'\''"
+                      )
+                  elif "plugins {" in g_content:
+                      g_content = g_content.replace(
+                          "plugins {",
+                          "plugins {\n    id '\''kotlin-android'\''"
+                      )
+                  with open(gradle_path, "w") as f:
+                      f.write(g_content)
+
+          # 3. Dodanie zależności Kotlin do głównego pliku build.gradle
+          top_gradle_path = "android/build.gradle"
+          if os.path.exists(top_gradle_path):
+              with open(top_gradle_path, "r") as f:
+                  tg_content = f.read()
+
+              if "kotlin-gradle-plugin" not in tg_content:
+                  if "dependencies {" in tg_content:
+                      tg_content = tg_content.replace(
+                          "dependencies {",
+                          "dependencies {\n        classpath \"org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25\""
+                      )
+                      with open(top_gradle_path, "w") as f:
+                          f.write(tg_content)
+
+          # 4. Modyfikacja MainActivity.java / MainActivity.kt
           candidates = glob.glob("android/app/src/main/java/**/MainActivity.java", recursive=True) + \
                        glob.glob("android/app/src/main/java/**/MainActivity.kt", recursive=True)
-          if not candidates:
-              raise SystemExit("MainActivity nie znalezione")
-          main_activity_path = candidates[0]
-          with open(main_activity_path, "r") as f:
-              content = f.read()
+          if candidates:
+              main_activity_path = candidates[0]
+              with open(main_activity_path, "r") as f:
+                  content = f.read()
 
-          is_kotlin = main_activity_path.endswith(".kt")
-          import_line = ("import com.pitchrec.backgroundrecorder.BackgroundRecorderPlugin" if is_kotlin
-                         else "import com.pitchrec.backgroundrecorder.BackgroundRecorderPlugin;")
-          register_call = ("registerPlugin(BackgroundRecorderPlugin::class.java)" if is_kotlin
-                            else "registerPlugin(BackgroundRecorderPlugin.class);")
+              is_kotlin = main_activity_path.endswith(".kt")
+              import_line = "import com.pitchrec.backgroundrecorder.BackgroundRecorderPlugin;"
+              register_call = "registerPlugin(BackgroundRecorderPlugin.class);"
 
-          if "BackgroundRecorderPlugin" not in content:
-              lines = content.split("\n")
-              import_indices = [i for i, l in enumerate(lines) if l.strip().startswith("import ")]
-              if import_indices:
-                  lines.insert(max(import_indices) + 1, import_line)
-              else:
-                  pkg_idx = next(i for i, l in enumerate(lines) if l.strip().startswith("package "))
-                  lines.insert(pkg_idx + 1, "")
-                  lines.insert(pkg_idx + 2, import_line)
-              content = "\n".join(lines)
-
-              onCreatePattern = (r"override fun onCreate\([^)]*\)\s*\{" if is_kotlin
-                                 else r"protected void onCreate\([^)]*\)\s*\{")
-              if re.search(onCreatePattern, content):
-                  content = re.sub(onCreatePattern, lambda m: m.group(0) + "\n        " + register_call, content, count=1)
-              else:
-                  class_pattern = (r"(class MainActivity\s*:\s*BridgeActivity\(\)\s*\{)" if is_kotlin
-                                    else r"(public class MainActivity extends BridgeActivity\s*\{)")
-                  if is_kotlin:
-                      new_method = (
-                          "\n    override fun onCreate(savedInstanceState: android.os.Bundle?) {\n"
-                          "        registerPlugin(BackgroundRecorderPlugin::class.java)\n"
-                          "        super.onCreate(savedInstanceState)\n"
-                          "    }\n"
-                      )
+              if "BackgroundRecorderPlugin" not in content:
+                  lines = content.split("\n")
+                  import_indices = [i for i, l in enumerate(lines) if l.strip().startswith("import ")]
+                  if import_indices:
+                      lines.insert(max(import_indices) + 1, import_line)
                   else:
-                      new_method = (
-                          "\n    @Override\n"
-                          "    protected void onCreate(android.os.Bundle savedInstanceState) {\n"
-                          "        registerPlugin(BackgroundRecorderPlugin.class);\n"
-                          "        super.onCreate(savedInstanceState);\n"
-                          "    }\n"
+                      pkg_idx = next(i for i, l in enumerate(lines) if l.strip().startswith("package "))
+                      lines.insert(pkg_idx + 1, "")
+                      lines.insert(pkg_idx + 2, import_line)
+                  content = "\n".join(lines)
+
+                  if "onCreate" in content:
+                      content = re.sub(
+                          r"(protected void onCreate\([^)]*\)\s*\{)",
+                          r"\1\n        " + register_call,
+                          content,
+                          count=1
                       )
-                  if re.search(class_pattern, content):
-                      content = re.sub(class_pattern, r"\1" + new_method, content, count=1)
 
-          with open(main_activity_path, "w") as f:
-              f.write(content)
+                  with open(main_activity_path, "w") as f:
+                      f.write(content)
 
+          # 5. Modyfikacja AndroidManifest.xml
           manifest_path = "android/app/src/main/AndroidManifest.xml"
-          with open(manifest_path, "r") as f:
-              content = f.read()
+          if os.path.exists(manifest_path):
+              with open(manifest_path, "r") as f:
+                  m_content = f.read()
 
-          perms = """
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-              <uses-permission android:name="android.permission.WAKE_LOCK" />
-          """
-          if "</manifest>" in content and "FOREGROUND_SERVICE_MICROPHONE" not in content:
-              content = content.replace("</manifest>", f"{perms}\n</manifest>")
+              perms = """
+                  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+                  <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+                  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+                  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+                  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+                  <uses-permission android:name="android.permission.WAKE_LOCK" />
+              """
+              if "</manifest>" in m_content and "FOREGROUND_SERVICE_MICROPHONE" not in m_content:
+                  m_content = m_content.replace("</manifest>", f"{perms}\n</manifest>")
 
-          service_decl = """
-              <service android:name="com.pitchrec.backgroundrecorder.BackgroundRecorderService" android:foregroundServiceType="microphone" android:exported="false" />
-          """
-          if "</application>" in content and "BackgroundRecorderService" not in content:
-              content = content.replace("</application>", f"{service_decl}\n</application>")
+              service_decl = """
+                  <service android:name="com.pitchrec.backgroundrecorder.BackgroundRecorderService" android:foregroundServiceType="microphone" android:exported="false" />
+              """
+              if "</application>" in m_content and "BackgroundRecorderService" not in m_content:
+                  m_content = m_content.replace("</application>", f"{service_decl}\n</application>")
 
-          with open(manifest_path, "w") as f:
-              f.write(content)
+              with open(manifest_path, "w") as f:
+                  f.write(m_content)
           '
 
       - name: Build APK
