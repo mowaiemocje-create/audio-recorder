@@ -7208,7 +7208,14 @@ document.addEventListener('visibilitychange',function(){
     // Sprawdź NAJPIERW czy sam mikrofon nie został ubity w tle (iOS) — jeśli tak,
     // pokaż baner odzyskiwania od razu, zamiast na próżno próbować wznowić martwe obiekty
     var trackDead = MS && MS.getAudioTracks().length>0 && MS.getAudioTracks()[0].readyState==='ended';
-    if(trackDead){
+    if(trackDead && state==='rec'){
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function(newStream){
+        MS = newStream;
+        const mime=['audio/webm;codecs=opus','audio/webm','audio/ogg'].find(m=>MediaRecorder.isTypeSupported(m))||'';
+        MR = new MediaRecorder(MS, mime ? {mimeType: mime} : {});
+        MR.start(100);
+      }).catch(function(){ showMicLostBanner(); });
+    } else if(trackDead){
       showMicLostBanner();
     } else {
     // Wznów AudioContext jeśli system go zawiesił
