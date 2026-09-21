@@ -140,7 +140,13 @@ public class BackgroundRecorderService extends Service {
             if (minBufferSize <= 0) throw new IOException("AudioRecord.getMinBufferSize failed: " + minBufferSize);
             int bufferSize = minBufferSize * 4; // trochę zapasu, jak w sprawdzonych implementacjach
 
-            audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE, CHANNELS, ENCODING, bufferSize);
+            // EKSPERYMENT: VOICE_COMMUNICATION zamiast MIC — źródło używane przez aplikacje
+            // VoIP/telefoniczne, może mieć inny priorytet/traktowanie przez system w tle
+            // (połączenia są uznawane za funkcję wysokiego priorytetu, niemożliwą do przerwania).
+            // Zwykły MIC z każdą inną warstwą ochrony (Foreground Service, WakeLock,
+            // AudioFocus, MediaSession) nadal milknie po 5s — to jedna z niewielu rzeczy na
+            // poziomie Javy, których jeszcze nie próbowaliśmy.
+            audioRecord = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, SAMPLE_RATE, CHANNELS, ENCODING, bufferSize);
             if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
                 throw new IOException("AudioRecord nie zainicjalizowany poprawnie");
             }
