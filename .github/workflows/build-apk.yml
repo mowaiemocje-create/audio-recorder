@@ -40,8 +40,8 @@ jobs:
       - name: Copy custom native recording service
         run: |
           mkdir -p android/app/src/main/java/com/pitchrec/backgroundrecorder
-          cp native/BackgroundRecorderPlugin.kt android/app/src/main/java/com/pitchrec/backgroundrecorder/
-          cp native/BackgroundRecorderService.kt android/app/src/main/java/com/pitchrec/backgroundrecorder/
+          cp native/BackgroundRecorderPlugin.java android/app/src/main/java/com/pitchrec/backgroundrecorder/
+          cp native/BackgroundRecorderService.java android/app/src/main/java/com/pitchrec/backgroundrecorder/
 
       - name: Register plugin, add manifest permissions and service declaration
         run: |
@@ -100,46 +100,46 @@ jobs:
                   else:
                       raise SystemExit("Nie znaleziono deklaracji klasy MainActivity - sprawdz recznie")
 
-          with open(main_activity_path, "w") as f:
-              f.write(content)
+      with open(main_activity_path, "w") as f:
+          f.write(content)
 
-          manifest_path = "android/app/src/main/AndroidManifest.xml"
-          with open(manifest_path, "r") as f:
-              content = f.read()
+      manifest_path = "android/app/src/main/AndroidManifest.xml"
+      with open(manifest_path, "r") as f:
+          content = f.read()
 
-          perms = """
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-              <uses-permission android:name="android.permission.WAKE_LOCK" />
-          """
-          if "</manifest>" in content and "FOREGROUND_SERVICE_MICROPHONE" not in content:
-              content = content.replace("</manifest>", f"{perms}\n</manifest>")
+      perms = """
+          <uses-permission android:name="android.permission.RECORD_AUDIO" />
+          <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+          <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+          <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+          <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+          <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+          <uses-permission android:name="android.permission.WAKE_LOCK" />
+      """
+      if "</manifest>" in content and "FOREGROUND_SERVICE_MICROPHONE" not in content:
+          content = content.replace("</manifest>", f"{perms}\n</manifest>")
 
-          service_decl = """
-              <service android:name="com.pitchrec.backgroundrecorder.BackgroundRecorderService" android:foregroundServiceType="microphone" android:exported="false" />
-          """
-          if "</application>" in content and "BackgroundRecorderService" not in content:
-              content = content.replace("</application>", f"{service_decl}\n</application>")
+      service_decl = """
+          <service android:name="com.pitchrec.backgroundrecorder.BackgroundRecorderService" android:foregroundServiceType="microphone" android:exported="false" />
+      """
+      if "</application>" in content and "BackgroundRecorderService" not in content:
+          content = content.replace("</application>", f"{service_decl}\n</application>")
 
-          with open(manifest_path, "w") as f:
-              f.write(content)
+      with open(manifest_path, "w") as f:
+          f.write(content)
 
-          print("MainActivity poprawione:", main_activity_path)
-          print("Manifest poprawiony:", manifest_path)
-          '
+      print("MainActivity poprawione:", main_activity_path)
+      print("Manifest poprawiony:", manifest_path)
+      '
 
-      - name: Build APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
+  - name: Build APK
+    run: |
+      cd android
+      chmod +x gradlew
+      ./gradlew assembleDebug
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug.apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+  - name: Upload APK
+    uses: actions/upload-artifact@v4
+    with:
+      name: app-debug.apk
+      path: android/app/build/outputs/apk/debug/app-debug.apk
