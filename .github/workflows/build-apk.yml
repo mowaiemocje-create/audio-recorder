@@ -45,12 +45,6 @@ jobs:
             npx capacitor-assets generate --android || true
           fi
 
-      - name: DIAGNOSTIC - lower targetSdkVersion to test
-        run: |
-          sed -i 's/targetSdkVersion = 35/targetSdkVersion = 33/' android/variables.gradle
-          sed -i 's/targetSdkVersion = 34/targetSdkVersion = 33/' android/variables.gradle || true
-          cat android/variables.gradle
-
       - name: Copy custom native recording service
         run: |
           mkdir -p android/app/src/main/java/com/pitchrec/backgroundrecorder
