@@ -155,7 +155,8 @@ public class BackgroundRecorderService extends Service {
                 outputFile.delete();
             }
         } catch (Exception e) {
-            BackgroundRecorderPlugin.rejectStop("FAILED_TO_FETCH_RECORDING", e.message != null ? e.getMessage() : e.toString());
+            String errMsg = e.getMessage() != null ? e.getMessage() : e.toString();
+            BackgroundRecorderPlugin.rejectStop("FAILED_TO_FETCH_RECORDING", errMsg);
         } finally {
             currentStatus = "NONE";
             releaseWakeLock();
@@ -257,7 +258,7 @@ public class BackgroundRecorderService extends Service {
             } catch (Exception e) {}
         }
 
-        return builder.build();
+        return builder.build;
     }
 
     private void updateNotification(String text) {
