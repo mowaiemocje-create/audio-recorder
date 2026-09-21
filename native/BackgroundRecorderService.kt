@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.MediaRecorder
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -22,11 +24,13 @@ class BackgroundRecorderService : Service() {
     private var pausedAccumMs: Long = 0L
     private var lastResumeAt: Long = 0L
     private var wakeLock: PowerManager.WakeLock? = null
+    private var mediaSession: MediaSession? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         releaseWakeLock()
+        releaseMediaSession()
         super.onDestroy()
     }
 
@@ -44,14 +48,11 @@ class BackgroundRecorderService : Service() {
         if (currentStatus == "RECORDING") return
 
         createNotificationChannel()
+        setupMediaSession()
         val notification = buildNotification("Nagrywanie…")
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -61,7 +62,7 @@ class BackgroundRecorderService : Service() {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PitchRec:BackgroundRecorderWakeLock")
             wakeLock?.setReferenceCounted(false)
             wakeLock?.acquire(4 * 60 * 60 * 1000L)
-        } catch (e: Exception) {}
+        } catch (e: Exception) { }
 
         try {
             outputFile = File(cacheDir, "bg_recording_${System.currentTimeMillis()}.m4a")
@@ -82,6 +83,7 @@ class BackgroundRecorderService : Service() {
         } catch (e: Exception) {
             currentStatus = "NONE"
             releaseWakeLock()
+            releaseMediaSession()
             BackgroundRecorderPlugin.rejectStop("FAILED_TO_RECORD", e.message)
             stopForegroundCompat()
             stopSelf()
@@ -95,9 +97,10 @@ class BackgroundRecorderService : Service() {
                 recorder?.pause()
                 pausedAccumMs += System.currentTimeMillis() - lastResumeAt
                 currentStatus = "PAUSED"
+                updatePlaybackState(PlaybackState.STATE_PAUSED)
                 updateNotification("Pauza")
             }
-        } catch (e: Exception) {}
+        } catch (e: Exception) { }
     }
 
     private fun handleResume() {
@@ -107,9 +110,10 @@ class BackgroundRecorderService : Service() {
                 recorder?.resume()
                 lastResumeAt = System.currentTimeMillis()
                 currentStatus = "RECORDING"
+                updatePlaybackState(PlaybackState.STATE_PLAYING)
                 updateNotification("Nagrywanie…")
             }
-        } catch (e: Exception) {}
+        } catch (e: Exception) { }
     }
 
     private fun handleStop() {
@@ -139,15 +143,49 @@ class BackgroundRecorderService : Service() {
         } finally {
             currentStatus = "NONE"
             releaseWakeLock()
+            releaseMediaSession()
             stopForegroundCompat()
             stopSelf()
         }
     }
 
+    private fun setupMediaSession() {
+        if (mediaSession != null) return
+        try {
+            val session = MediaSession(this, "PitchRecBackgroundRecorder")
+            session.setCallback(object : MediaSession.Callback() {})
+            val state = PlaybackState.Builder()
+                .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_STOP)
+                .setState(PlaybackState.STATE_PLAYING, 0, 1f)
+                .build()
+            session.setPlaybackState(state)
+            session.isActive = true
+            mediaSession = session
+        } catch (e: Exception) { }
+    }
+
+    private fun updatePlaybackState(state: Int) {
+        try {
+            val playbackState = PlaybackState.Builder()
+                .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_STOP)
+                .setState(state, 0, if (state == PlaybackState.STATE_PLAYING) 1f else 0f)
+                .build()
+            mediaSession?.setPlaybackState(playbackState)
+        } catch (e: Exception) { }
+    }
+
+    private fun releaseMediaSession() {
+        try {
+            mediaSession?.isActive = false
+            mediaSession?.release()
+        } catch (e: Exception) { }
+        mediaSession = null
+    }
+
     private fun releaseWakeLock() {
         try {
             if (wakeLock?.isHeld == true) wakeLock?.release()
-        } catch (e: Exception) {}
+        } catch (e: Exception) { }
         wakeLock = null
     }
 
@@ -184,6 +222,13 @@ class BackgroundRecorderService : Service() {
             .setContentText(text)
             .setSmallIcon(applicationInfo.icon)
             .setOngoing(true)
+
+        mediaSession?.let { session ->
+            try {
+                builder.setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken))
+            } catch (e: Exception) { }
+        }
+
         return builder.build()
     }
 
