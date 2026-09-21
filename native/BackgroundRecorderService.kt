@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Base64
 import java.io.File
 
@@ -20,8 +21,14 @@ class BackgroundRecorderService : Service() {
     private var recordingStartedAt: Long = 0L
     private var pausedAccumMs: Long = 0L
     private var lastResumeAt: Long = 0L
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        releaseWakeLock()
+        super.onDestroy()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -50,6 +57,13 @@ class BackgroundRecorderService : Service() {
         }
 
         try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PitchRec:BackgroundRecorderWakeLock")
+            wakeLock?.setReferenceCounted(false)
+            wakeLock?.acquire(4 * 60 * 60 * 1000L)
+        } catch (e: Exception) {}
+
+        try {
             outputFile = File(cacheDir, "bg_recording_${System.currentTimeMillis()}.m4a")
             recorder = MediaRecorder().apply {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
@@ -67,6 +81,7 @@ class BackgroundRecorderService : Service() {
             currentStatus = "RECORDING"
         } catch (e: Exception) {
             currentStatus = "NONE"
+            releaseWakeLock()
             BackgroundRecorderPlugin.rejectStop("FAILED_TO_RECORD", e.message)
             stopForegroundCompat()
             stopSelf()
@@ -123,9 +138,17 @@ class BackgroundRecorderService : Service() {
             BackgroundRecorderPlugin.rejectStop("FAILED_TO_FETCH_RECORDING", e.message)
         } finally {
             currentStatus = "NONE"
+            releaseWakeLock()
             stopForegroundCompat()
             stopSelf()
         }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (e: Exception) {}
+        wakeLock = null
     }
 
     private fun stopForegroundCompat() {
