@@ -7,7 +7,10 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.media.session.MediaSession;
@@ -18,12 +21,22 @@ import android.os.PowerManager;
 import android.os.Process;
 import android.util.Base64;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.io.ByteArrayOutputStream;
 
+// KLUCZOWY plik całego rozwiązania: to jest prawdziwy Android Foreground Service.
+//
+// WAŻNA ZMIANA (v3): po zdekompilowaniu działającej aplikacji (RecForge 2, potwierdzone że
+// działa z zablokowanym ekranem na tym samym telefonie/Androidzie) znalezione zostały dwie
+// kluczowe różnice względem wcześniejszej wersji:
+//   1. Deklarowany typ serwisu to "microphone|mediaPlayback" RAZEM, nie sam "microphone"
+//   2. Nagrywanie odbywa się przez RĘCZNĄ pętlę AudioRecord.read() na dedykowanym wątku,
+//      NIE przez wysokopoziomowe MediaRecorder — MediaRecorder ma własną, mniej przejrzystą
+//      sesję audio wewnątrz, która najwyraźniej bywa usypiana przez system mimo poprawnie
+//      skonfigurowanego Foreground Service; ręczna pętla AudioRecord jest bardziej odporna.
 public class BackgroundRecorderService extends Service {
 
     public static final String ACTION_START = "com.pitchrec.backgroundrecorder.START";
@@ -33,7 +46,7 @@ public class BackgroundRecorderService extends Service {
     public static final String CHANNEL_ID = "pitchrec_recording_channel";
     public static final int NOTIFICATION_ID = 1001;
 
-    public static volatile String currentStatus = "NONE";
+    public static volatile String currentStatus = "NONE"; // "NONE" | "RECORDING" | "PAUSED"
 
     private static final int SAMPLE_RATE = 44100;
     private static final int CHANNELS = AudioFormat.CHANNEL_IN_MONO;
@@ -51,6 +64,7 @@ public class BackgroundRecorderService extends Service {
     private long lastResumeAt = 0L;
     private PowerManager.WakeLock wakeLock;
     private MediaSession mediaSession;
+    private AudioFocusRequest audioFocusRequest;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -60,6 +74,7 @@ public class BackgroundRecorderService extends Service {
     @Override
     public void onDestroy() {
         releaseWakeLock();
+            releaseAudioFocus();
         releaseMediaSession();
         super.onDestroy();
     }
@@ -79,8 +94,11 @@ public class BackgroundRecorderService extends Service {
 
         createNotificationChannel();
         setupMediaSession();
-        Notification notification = buildNotification("Nagrywanie aktywne…");
+        Notification notification = buildNotification("Nagrywanie…");
 
+        // WAŻNE: łączymy microphone|mediaPlayback (bitwise OR) — potwierdzone w
+        // zdekompilowanej, działającej aplikacji, że to kombinacja obu typów naraz,
+        // nie sam "microphone".
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             int combinedType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                     | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
@@ -91,21 +109,40 @@ public class BackgroundRecorderService extends Service {
 
         try {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            if (pm != null) {
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PitchRec:BackgroundRecorderWakeLock");
-                wakeLock.setReferenceCounted(false);
-                wakeLock.acquire(6 * 60 * 60 * 1000L);
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PitchRec:BackgroundRecorderWakeLock");
+            wakeLock.setReferenceCounted(false);
+            wakeLock.acquire(4 * 60 * 60 * 1000L);
+        } catch (Exception e) { /* ignorowane */ }
+
+        // Jawne żądanie audio focus — potwierdzone w zdekompilowanej, działającej aplikacji
+        // (RecForge), że robią to explicite. "Best effort": jeśli focus zostanie odmówiony,
+        // nagrywanie i tak kontynuuje (dokładnie tak jak oni), to nie jest twardy wymóg.
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                AudioAttributes attrs = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build();
+                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                        .setAudioAttributes(attrs)
+                        .build();
+                am.requestAudioFocus(audioFocusRequest);
+            } else {
+                //noinspection deprecation
+                am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
             }
-        } catch (Exception e) { }
+        } catch (Exception e) { /* ignorowane — best effort, jak w RecForge */ }
 
         try {
             outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".wav");
             int minBufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNELS, ENCODING);
-            int bufferSize = Math.max(minBufferSize * 4, 8192);
+            if (minBufferSize <= 0) throw new IOException("AudioRecord.getMinBufferSize failed: " + minBufferSize);
+            int bufferSize = minBufferSize * 4; // trochę zapasu, jak w sprawdzonych implementacjach
 
             audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE, CHANNELS, ENCODING, bufferSize);
             if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
-                throw new IOException("AudioRecord initialization failed");
+                throw new IOException("AudioRecord nie zainicjalizowany poprawnie");
             }
 
             outputStream = new RandomAccessFile(outputFile, "rw");
@@ -113,6 +150,9 @@ public class BackgroundRecorderService extends Service {
             pcmBytesWritten = 0L;
 
             audioRecord.startRecording();
+            if (audioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                throw new IOException("AudioRecord.startRecording() nie uruchomiło nagrywania");
+            }
 
             recording = true;
             paused = false;
@@ -125,7 +165,9 @@ public class BackgroundRecorderService extends Service {
             recordThread = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    try { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO); } catch (Exception e) { }
+                    // Wątek dedykowany wyłącznie do czytania próbek — priorytet AUDIO,
+                    // tak jak w sprawdzonych, działających implementacjach.
+                    try { Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO); } catch (Exception e) { }
                     byte[] buffer = new byte[finalBufferSize];
                     while (recording) {
                         if (paused) {
@@ -137,7 +179,11 @@ public class BackgroundRecorderService extends Service {
                             try {
                                 outputStream.write(buffer, 0, read);
                                 pcmBytesWritten += read;
-                            } catch (IOException ioe) { }
+                            } catch (IOException ioe) {
+                                // Pojedynczy błąd zapisu nie powinien ubić całej pętli —
+                                // spróbuj dalej, plik i tak będzie miał poprawną długość
+                                // ustawioną na koniec na podstawie pcmBytesWritten.
+                            }
                         }
                     }
                 }
@@ -147,6 +193,7 @@ public class BackgroundRecorderService extends Service {
             currentStatus = "NONE";
             cleanupAudioResources();
             releaseWakeLock();
+            releaseAudioFocus();
             releaseMediaSession();
             BackgroundRecorderPlugin.rejectStop("FAILED_TO_RECORD", e.getMessage());
             stopForegroundCompat();
@@ -169,7 +216,7 @@ public class BackgroundRecorderService extends Service {
         lastResumeAt = System.currentTimeMillis();
         currentStatus = "RECORDING";
         updatePlaybackState(PlaybackState.STATE_PLAYING);
-        updateNotification("Nagrywanie aktywne…");
+        updateNotification("Nagrywanie…");
     }
 
     private void handleStop() {
@@ -200,6 +247,7 @@ public class BackgroundRecorderService extends Service {
         } finally {
             currentStatus = "NONE";
             releaseWakeLock();
+            releaseAudioFocus();
             releaseMediaSession();
             stopForegroundCompat();
             stopSelf();
@@ -218,9 +266,12 @@ public class BackgroundRecorderService extends Service {
         outputStream = null;
     }
 
+    // ── Zapis WAV ręcznie (nagłówek 44 bajty, potem surowe próbki PCM 16-bit) — prostsze niż
+    // integrowanie natywnego kodera, ale zachowuje kluczową architekturę: ręczna pętla
+    // AudioRecord zamiast MediaRecorder. ──
     private void writeWavHeaderPlaceholder(RandomAccessFile raf) throws IOException {
         byte[] header = new byte[44];
-        raf.write(header);
+        raf.write(header); // wypełnione zerami na razie — prawdziwe wartości ustawiane na końcu
     }
 
     private void finalizeWavHeader(RandomAccessFile raf, long pcmDataSize) throws IOException {
@@ -235,8 +286,8 @@ public class BackgroundRecorderService extends Service {
         writeIntLE(raf, (int) totalDataLen);
         raf.writeBytes("WAVE");
         raf.writeBytes("fmt ");
-        writeIntLE(raf, 16);
-        writeShortLE(raf, (short) 1);
+        writeIntLE(raf, 16); // rozmiar podchunk fmt
+        writeShortLE(raf, (short) 1); // PCM
         writeShortLE(raf, (short) channels);
         writeIntLE(raf, SAMPLE_RATE);
         writeIntLE(raf, (int) byteRate);
@@ -282,7 +333,7 @@ public class BackgroundRecorderService extends Service {
             session.setPlaybackState(state);
             session.setActive(true);
             mediaSession = session;
-        } catch (Exception e) { }
+        } catch (Exception e) { /* ignorowane */ }
     }
 
     private void updatePlaybackState(int state) {
@@ -313,10 +364,24 @@ public class BackgroundRecorderService extends Service {
         wakeLock = null;
     }
 
+    private void releaseAudioFocus() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
+                am.abandonAudioFocusRequest(audioFocusRequest);
+            } else {
+                //noinspection deprecation
+                am.abandonAudioFocus(null);
+            }
+        } catch (Exception e) { }
+        audioFocusRequest = null;
+    }
+
     private void stopForegroundCompat() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE);
         } else {
+            //noinspection deprecation
             stopForeground(true);
         }
     }
@@ -326,7 +391,7 @@ public class BackgroundRecorderService extends Service {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID, "Nagrywanie w tle", NotificationManager.IMPORTANCE_LOW);
             NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-            if (manager != null) manager.createNotificationChannel(channel);
+            manager.createNotificationChannel(channel);
         }
     }
 
@@ -335,6 +400,7 @@ public class BackgroundRecorderService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             builder = new Notification.Builder(this, CHANNEL_ID);
         } else {
+            //noinspection deprecation
             builder = new Notification.Builder(this);
         }
         builder.setContentTitle("PitchRec")
@@ -353,6 +419,6 @@ public class BackgroundRecorderService extends Service {
 
     private void updateNotification(String text) {
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager != null) manager.notify(NOTIFICATION_ID, buildNotification(text));
+        manager.notify(NOTIFICATION_ID, buildNotification(text));
     }
 }
