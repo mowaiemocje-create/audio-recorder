@@ -1,5 +1,8 @@
 {
   "appId": "com.example.audiorecorder",
   "appName": "Audio Recorder",
-  "webDir": "www"
+  "webDir": "www",
+  "android": {
+    "adjustPan": true
+  }
 }
