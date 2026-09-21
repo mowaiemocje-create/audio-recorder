@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="color-scheme" content="light dark">
-<meta name="app-version" content="v105">
+<meta name="app-version" content="v106">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#0d0d1a">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -227,30 +227,35 @@ input::placeholder,textarea::placeholder{color:var(--mu);opacity:.7}
 
 
 
+
 <style>
   html, body {
     background-color: #17171C !important;
   }
   
-  /* Przestrzeń robocza stron - zwalnia miejsce na dolne menu */
-  .pages {
+  /* Strona główna DAW – układ pionowy od góry do dołu */
+  #pg-daw {
   }
 
-  /* Podstrony dostosowują się do wolnej przestrzeni */
-  .pg {
+  /* Wykres fali dźwiękowej scina się elastycznie, żeby zostawić miejsce na przyciski */
+  .cw {
   }
 
-  /* Sekcja sterowania DAW (suwaki i przyciski) */
+  /* Panel sterowania (suwaki, poziom i przyciski PLAY/REC) – zawsze widoczny nad menu */
   .ctrl {
+    background: #232329 !important;
+    border-top: 1px solid #33333C !important;
   }
 
-  /* Przyciski PLAY / REC / PAUZA w jednym wierszu bez ściskania */
   .br {
   }
 
-  /* Dolne menu nawigacyjne */
+  .btn {
+  }
+
+  /* Nawigacja u samej dołu ekranu */
   .nav {
-    background-color: #232329 !important;
+    background-color: #17171C !important;
     border-top: 1px solid #33333C !important;
   }
 
@@ -325,7 +330,7 @@ input::placeholder,textarea::placeholder{color:var(--mu);opacity:.7}
       </div>
       <div class="br">
         <button class="btn bPl" id="bPl" onclick="togglePlay()">
-          <svg viewBox="0 0 24 24"><path d="M8 5v105l11-7z"/></svg>PLAY
+          <svg viewBox="0 0 24 24"><path d="M8 5v106l11-7z"/></svg>PLAY
         </button>
         <button class="btn bRec" id="bRec" onclick="onRecBtn()">
           <svg id="rIco" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg>
@@ -639,7 +644,7 @@ input::placeholder,textarea::placeholder{color:var(--mu);opacity:.7}
       <!-- Header -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px 6px">
         <div class="page-title" style="padding:0" id="page-title-set">USTAWIENIA</div>
-        <div style="font-size:9px;color:var(--mu)" id="verLbl">v105</div>
+        <div style="font-size:9px;color:var(--mu)" id="verLbl">v106</div>
       </div>
 
       <!-- KONTO NS -->
@@ -787,11 +792,11 @@ input::placeholder,textarea::placeholder{color:var(--mu);opacity:.7}
 
 <nav class="nav">
   <button class="nav-btn on" id="nav-daw" onclick="showPage('daw')">
-    <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v105zm0-5h18v-2H3v105zm0-7v105h18V6H3z"/></svg>
+    <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v106zm0-5h18v-2H3v106zm0-7v106h18V6H3z"/></svg>
     <span>DAW</span>
   </button>
   <button class="nav-btn" id="nav-recs" onclick="showPage('recs')">
-    <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v105l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+    <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v106l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
     <span>NAGRANIA</span>
   </button>
   <button class="nav-btn" id="nav-fix" onclick="showPage('fix')" style="position:relative">
@@ -800,12 +805,12 @@ input::placeholder,textarea::placeholder{color:var(--mu);opacity:.7}
     <span id="navFixBadge" style="display:none;position:absolute;top:2px;right:18%;min-width:16px;height:16px;border-radius:8px;background:var(--warn);color:#000;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;padding:0 4px"></span>
   </button>
   <button class="nav-btn" id="nav-diary" onclick="showPage('diary')" style="position:relative">
-    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v105c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v105zm0-4H7v-2h10v105zm0-4H7V7h10v105z"/></svg>
+    <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v106c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v106zm0-4H7v-2h10v106zm0-4H7V7h10v106z"/></svg>
     <span id="navDiaryLabel">DZIENNIK</span>
     <span id="navDiaryBadge" style="display:none;position:absolute;top:2px;right:18%;min-width:16px;height:16px;border-radius:8px;background:var(--acc);color:#000;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;padding:0 4px"></span>
   </button>
   <button class="nav-btn" id="nav-stats" onclick="showPage('stats')">
-    <svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v105h-2.8zm5.6 8H19v105h-2.8z"/></svg>
+    <svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v106h-2.8zm5.6 8H19v106h-2.8z"/></svg>
     <span>STATS</span>
   </button>
   <button class="nav-btn" id="nav-set" onclick="showPage('set')">
@@ -1790,7 +1795,7 @@ function stopPlay(){
   if(pbAC){try{pbAC.close();}catch(e){}pbAC=null;}
   window._pbGain=null;
   bPl.classList.remove('on');
-  bPl.innerHTML='<svg viewBox="0 0 24 24"><path d="M8 5v105l11-7z"/></svg>PLAY';
+  bPl.innerHTML='<svg viewBox="0 0 24 24"><path d="M8 5v106l11-7z"/></svg>PLAY';
   redraw();
 }
 
