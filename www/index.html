@@ -223,7 +223,7 @@ input::placeholder,textarea::placeholder{color:var(--mu);opacity:.7}
 #recsLimitBar{background:var(--bg)!important}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
-</head>
+<style>body, html { padding-bottom: calc(16px + env(safe-area-inset-bottom)) !important; box-sizing: border-box; }</style></head>
 <body>
 
 <div class="top">
@@ -1429,6 +1429,30 @@ var curLang=localStorage.getItem('pitchrec_lang')||'pl';
 function t(k){return (LANGS[curLang]||LANGS.pl)[k]||LANGS.pl[k]||k;}
 
 const SR=44100;
+// Wrapper na geolokalizację — w zwykłej przeglądarce/PWA działa dokładnie jak
+// navigator.geolocation (bez zmian), ale w natywnej aplikacji (Capacitor) przełącza się na
+// wtyczkę @capacitor/geolocation, bo goły navigator.geolocation w WebView nie ma jak poprosić
+// o uprawnienie na poziomie systemu Android. Kształt zwracanego obiektu (pos.coords.latitude
+// itd.) jest identyczny w obu przypadkach, więc reszta kodu nie wymaga zmian.
+function geoGetCurrentPosition(success,error,options){
+  if(window.Capacitor&&window.Capacitor.isNativePlatform()&&window.Capacitor.Plugins.Geolocation){
+    window.Capacitor.Plugins.Geolocation.getCurrentPosition(options||{}).then(success).catch(function(e){if(error)error(e);});
+  }else if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(success,error,options);
+  }else if(error){
+    error({code:2,message:'Geolocation not available'});
+  }
+}
+function geoWatchPosition(success,error,options){
+  if(window.Capacitor&&window.Capacitor.isNativePlatform()&&window.Capacitor.Plugins.Geolocation){
+    window.Capacitor.Plugins.Geolocation.watchPosition(options||{},function(pos,err){
+      if(err){if(error)error(err);return;}
+      success(pos);
+    });
+  }else if(navigator.geolocation){
+    navigator.geolocation.watchPosition(success,error,options);
+  }
+}
 const NOTES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const DPR=Math.min((window.devicePixelRatio||1)*1.5,4); // wymuszone dodatkowe nadpróbkowanie (supersampling) — wykres renderuje się w rozdzielczości WYŻSZEJ niż natywna gęstość ekranu telefonu, dla maksymalnej ostrości niezależnie od modelu telefonu
 const PMIN=55,PMAX=1050,MIN_SEG=0.08;
@@ -2647,7 +2671,7 @@ async function startRec(){
     // GPS — pobierz PODCZAS nagrywania (nie przy zapisie)
     // recordingGPS jest ZAMROŻONE — watchPosition w tle go nie nadpisuje
     // maximumAge:120000 — zaakceptuj pozycję sprzed max 2 min (szybciej w budynkach/sklepach ze słabym sygnałem)
-    if(navigator.geolocation)navigator.geolocation.getCurrentPosition(
+    geoGetCurrentPosition(
       function(pos){
         var snap={
           lat:pos.coords.latitude.toFixed(5),
@@ -2664,7 +2688,7 @@ async function startRec(){
         if(lastGPS && !recordingGPS){recordingGPS=lastGPS;return;}
         // Jeśli i tła brak — spróbuj trybu sieciowego (WiFi/wieże), często działa lepiej w budynkach niż czysty GPS
         if(!recordingGPS){
-          navigator.geolocation.getCurrentPosition(
+          geoGetCurrentPosition(
             function(pos2){
               var snap2={
                 lat:pos2.coords.latitude.toFixed(5),
@@ -2862,8 +2886,9 @@ function togglePlay(){
 function requestGPS(){
   var gb=document.getElementById('gpsBox');
   gb.textContent='⏳ Pobieranie GPS…';gb.style.borderColor='';gb.style.color='var(--mu)';
-  if(!navigator.geolocation){gb.textContent='❌ GPS niedostępny w tej przeglądarce';gb.style.borderColor='var(--warn)';return;}
-  navigator.geolocation.getCurrentPosition(
+  var geoAvailable=(window.Capacitor&&window.Capacitor.isNativePlatform()&&window.Capacitor.Plugins.Geolocation)||navigator.geolocation;
+  if(!geoAvailable){gb.textContent='❌ GPS niedostępny w tej przeglądarce';gb.style.borderColor='var(--warn)';return;}
+  geoGetCurrentPosition(
     function(p){
       var snap={lat:p.coords.latitude.toFixed(5),lon:p.coords.longitude.toFixed(5),acc:Math.round(p.coords.accuracy),ts:Date.now()};
       lastGPS=snap;
@@ -3409,16 +3434,14 @@ function refreshRecs(){
           describingRec=rec2;
           chunks=[];wavLen=0;segs=[]; // wyczyść stan DAW żeby modal nie mylił danych
           recordingGPS=null;
-          if(navigator.geolocation){
-            navigator.geolocation.getCurrentPosition(
-              function(pos){
-                var snap={lat:pos.coords.latitude.toFixed(5),lon:pos.coords.longitude.toFixed(5),acc:Math.round(pos.coords.accuracy),ts:Date.now()};
-                recordingGPS=snap;lastGPS=snap;
-              },
-              function(){ if(lastGPS)recordingGPS=lastGPS; },
-              {enableHighAccuracy:true,timeout:8000,maximumAge:120000}
-            );
-          }
+          geoGetCurrentPosition(
+            function(pos){
+              var snap={lat:pos.coords.latitude.toFixed(5),lon:pos.coords.longitude.toFixed(5),acc:Math.round(pos.coords.accuracy),ts:Date.now()};
+              recordingGPS=snap;lastGPS=snap;
+            },
+            function(){ if(lastGPS)recordingGPS=lastGPS; },
+            {enableHighAccuracy:true,timeout:8000,maximumAge:120000}
+          );
           openCatModal();
           return;
         }
@@ -7146,20 +7169,18 @@ setLang(curLang);
 renderDawMinimap();
 // GPS — pobieraj od razu przy starcie apki (watchPosition = ciągłe śledzenie)
 // UWAGA: aktualizuje tylko lastGPS (bieżąca pozycja), NIGDY recordingGPS (zamrożone z czasu nagrania)
-if(navigator.geolocation){
-  navigator.geolocation.watchPosition(
-    function(pos){
-      lastGPS={
-        lat:pos.coords.latitude.toFixed(5),
-        lon:pos.coords.longitude.toFixed(5),
-        acc:Math.round(pos.coords.accuracy),
-        ts:Date.now()
-      };
-    },
-    function(){},
-    {enableHighAccuracy:false,timeout:10000,maximumAge:60000}
-  );
-}
+geoWatchPosition(
+  function(pos){
+    lastGPS={
+      lat:pos.coords.latitude.toFixed(5),
+      lon:pos.coords.longitude.toFixed(5),
+      acc:Math.round(pos.coords.accuracy),
+      ts:Date.now()
+    };
+  },
+  function(){},
+  {enableHighAccuracy:false,timeout:10000,maximumAge:60000}
+);
 // Załaduj lamejs z góry jeśli domyślny format to mp3
 (function(){
   if((localStorage.getItem('pitchrec_fmt')||'mp3')==='mp3'&&typeof lamejs==='undefined'){
