@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="color-scheme" content="light dark">
-<meta name="app-version" content="v92">
+<meta name="app-version" content="v100">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#0d0d1a">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -222,6 +222,16 @@ input::placeholder,textarea::placeholder{color:var(--mu);opacity:.7}
 #recsLimitBar{background:var(--bg)!important}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+<style>
+  .pages, .pg, #pg-daw, #pg-recs, #pg-fix, #pg-diary { padding-bottom: 80px; }
+  .ctrl { position: relative; z-index: 100; margin-bottom: 0; }
+  .nav { position: fixed; bottom: 0; left: 0; right: 0; height: 65px; z-index: 9999; background: var(--card); padding-bottom: max(12px, env(safe-area-inset-bottom, 12px)); }
+</style>
+<style>
+  .pages, .pg, #pg-daw, #pg-recs, #pg-fix, #pg-diary { padding-bottom: 80px; }
+  .ctrl { position: relative; z-index: 100; margin-bottom: 0; }
+  .nav { position: fixed; bottom: 0; left: 0; right: 0; height: 65px; z-index: 9999; background: var(--card); padding-bottom: max(12px, env(safe-area-inset-bottom, 12px)); }
+</style>
 </head>
 <body>
 
