@@ -2,9 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
 
 jobs:
   build:
@@ -26,12 +24,23 @@ jobs:
           java-version: '21'
 
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: |
+          npm install --legacy-peer-deps
+          npm install @capacitor/geolocation --save --legacy-peer-deps
 
       - name: Capacitor Sync
         run: |
           npx cap add android || true
           npx cap sync android
+
+      - name: Generate app icon from logo
+        run: |
+          npm install @capacitor/assets --save-dev --legacy-peer-deps
+          mkdir -p assets
+          if [ -f "assets/icon-source.png" ]; then
+            convert assets/icon-source.png -resize 1024x1024 -gravity center -background black -extent 1024x1024 assets/icon.png
+            npx capacitor-assets generate --android || true
+          fi
 
       - name: DIAGNOSTIC - lower targetSdkVersion to test
         run: |
@@ -117,6 +126,8 @@ jobs:
               <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
           """
           if "</manifest>" in content and "FOREGROUND_SERVICE_MICROPHONE" not in content:
               content = content.replace("</manifest>", f"{perms}\n</manifest>")
