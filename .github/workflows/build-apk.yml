@@ -28,16 +28,15 @@ jobs:
           npm install --legacy-peer-deps
           npm install @capacitor/geolocation --save --legacy-peer-deps
 
-      - name: Install ImageMagick
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y imagemagick
-
       - name: Capacitor Sync
         run: |
           npx cap add android || true
           npx cap sync android
 
+      # Generuje WSZYSTKIE wymagane rozmiary ikony (dla każdej gęstości ekranu: mdpi, hdpi,
+      # xhdpi, xxhdpi, xxxhdpi + wersje okrągłe) z JEDNEGO pliku źródłowego logo. Logo nie
+      # musi być idealnym kwadratem — ImageMagick dopełnia je czarnym tłem (dopasowanym do
+      # tła samego logo) do kwadratu przed przekazaniem do oficjalnego narzędzia Capacitora.
       - name: Generate app icon from logo
         run: |
           npm install @capacitor/assets --save-dev --legacy-peer-deps
@@ -45,6 +44,20 @@ jobs:
           convert assets/icon-source.png -resize 1024x1024 -gravity center -background black -extent 1024x1024 assets/icon.png
           npx capacitor-assets generate --android
 
+      # TEST DIAGNOSTYCZNY: domyślny targetSdkVersion generowany przez Capacitor 7 to 35
+      # (Android 15) — najnowszy, najbardziej rygorystyczny. Obniżamy tymczasowo do 33, żeby
+      # sprawdzić czy to WŁAŚNIE nowe restrykcje (dostępne tylko dla aplikacji celujących w
+      # najnowsze SDK) blokują nagrywanie w tle, czy problem jest gdzie indziej.
+      - name: DIAGNOSTIC - lower targetSdkVersion to test
+        run: |
+          sed -i 's/targetSdkVersion = 35/targetSdkVersion = 33/' android/variables.gradle
+          cat android/variables.gradle
+
+      # WŁASNY, ZINTEGROWANY kod natywny — MediaRecorder działa BEZPOŚREDNIO wewnątrz
+      # Foreground Service (nie jako dwie osobne, niezwiązane rzeczy). Napisane w Javie
+      # (nie Kotlinie) — potwierdzone, że domyślny projekt Capacitor 7 NIE ma wtyczki
+      # Kotlina skonfigurowanej w Gradle, więc pliki .kt zostałyby skopiowane, ale nigdy
+      # nie skompilowane (dokładnie ten błąd który wystąpił przy poprzedniej próbie).
       - name: Copy custom native recording service
         run: |
           mkdir -p android/app/src/main/java/com/pitchrec/backgroundrecorder
@@ -56,10 +69,11 @@ jobs:
           python3 -c '
           import re, glob
 
+          # ── 1. Zarejestruj wtyczkę w MainActivity (Java albo Kotlin, z lub bez istniejącego onCreate) ──
           candidates = glob.glob("android/app/src/main/java/**/MainActivity.java", recursive=True) + \
                        glob.glob("android/app/src/main/java/**/MainActivity.kt", recursive=True)
           if not candidates:
-              raise SystemExit("MainActivity nie znalezione")
+              raise SystemExit("MainActivity nie znalezione — sprawdź strukturę projektu")
           main_activity_path = candidates[0]
           with open(main_activity_path, "r") as f:
               content = f.read()
@@ -84,8 +98,11 @@ jobs:
               onCreatePattern = (r"override fun onCreate\([^)]*\)\s*\{" if is_kotlin
                                  else r"protected void onCreate\([^)]*\)\s*\{")
               if re.search(onCreatePattern, content):
+                  # onCreate juz istnieje - wstaw wywolanie na samym poczatku, PRZED super.onCreate
                   content = re.sub(onCreatePattern, lambda m: m.group(0) + "\n        " + register_call, content, count=1)
               else:
+                  # onCreate NIE istnieje (typowe w nowszych szablonach Capacitor z pusta klasa) -
+                  # trzeba dodac cala metode, nie tylko wstawic linie do nieistniejacej.
                   class_pattern = (r"(class MainActivity\s*:\s*BridgeActivity\(\)\s*\{)" if is_kotlin
                                     else r"(public class MainActivity extends BridgeActivity\s*\{)")
                   if is_kotlin:
@@ -105,10 +122,13 @@ jobs:
                       )
                   if re.search(class_pattern, content):
                       content = re.sub(class_pattern, r"\1" + new_method, content, count=1)
+                  else:
+                      raise SystemExit("Nie znaleziono deklaracji klasy MainActivity - sprawdz recznie")
 
           with open(main_activity_path, "w") as f:
               f.write(content)
 
+          # ── 2. Uprawnienia + deklaracja <service> w AndroidManifest.xml ──
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           with open(manifest_path, "r") as f:
               content = f.read()
@@ -118,20 +138,17 @@ jobs:
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
               <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.WAKE_LOCK" />
-              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-              <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
           """
-          if "</manifest>" in content and "SCHEDULE_EXACT_ALARM" not in content:
+          if "</manifest>" in content and "FOREGROUND_SERVICE_MICROPHONE" not in content:
               content = content.replace("</manifest>", f"{perms}\n</manifest>")
 
           service_decl = """
-              <service android:name="com.pitchrec.backgroundrecorder.BackgroundRecorderService" android:foregroundServiceType="microphone|mediaPlayback" android:exported="false" />
+              <service android:name="com.pitchrec.backgroundrecorder.BackgroundRecorderService" android:foregroundServiceType="microphone" android:exported="false" />
           """
           if "</application>" in content and "BackgroundRecorderService" not in content:
               content = content.replace("</application>", f"{service_decl}\n</application>")
@@ -139,7 +156,8 @@ jobs:
           with open(manifest_path, "w") as f:
               f.write(content)
 
-          print("Skompletowano.")
+          print("MainActivity poprawione:", main_activity_path)
+          print("Manifest poprawiony:", manifest_path)
           '
 
       - name: Build APK

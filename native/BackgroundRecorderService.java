@@ -9,34 +9,31 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
-import android.media.AudioFormat;
 import android.media.AudioManager;
-import android.media.AudioRecord;
-import android.media.MediaRecorder;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
-import android.os.Process;
 import android.util.Base64;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.io.ByteArrayOutputStream;
 
-// KLUCZOWY plik całego rozwiązania: to jest prawdziwy Android Foreground Service.
+// KLUCZOWY plik całego rozwiązania: prawdziwy Android Foreground Service.
 //
-// WAŻNA ZMIANA (v3): po zdekompilowaniu działającej aplikacji (RecForge 2, potwierdzone że
-// działa z zablokowanym ekranem na tym samym telefonie/Androidzie) znalezione zostały dwie
-// kluczowe różnice względem wcześniejszej wersji:
-//   1. Deklarowany typ serwisu to "microphone|mediaPlayback" RAZEM, nie sam "microphone"
-//   2. Nagrywanie odbywa się przez RĘCZNĄ pętlę AudioRecord.read() na dedykowanym wątku,
-//      NIE przez wysokopoziomowe MediaRecorder — MediaRecorder ma własną, mniej przejrzystą
-//      sesję audio wewnątrz, która najwyraźniej bywa usypiana przez system mimo poprawnie
-//      skonfigurowanego Foreground Service; ręczna pętla AudioRecord jest bardziej odporna.
+// WERSJA NATYWNA (v4): faktyczne nagrywanie (AAudio, pętla odczytu próbek, zapis WAV) zostało
+// przeniesione do kodu C++ (native-lib.cpp, przez wrapper NativeAudioRecorder) — POZA zasięg
+// Javy i jej cyklu życia. To próba obejścia ograniczenia utrzymującego się mimo wyczerpania
+// WSZYSTKICH dostępnych technik na poziomie Java (Foreground Service z poprawnym typem,
+// WakeLock, MediaSession, AudioFocus, różne AudioSource) — wciąż milkło po dokładnie 5
+// sekundach od zablokowania ekranu, mimo że serwis/powiadomienie przeżywały.
+//
+// Cała reszta (Foreground Service, MediaSession, WakeLock, AudioFocus, powiadomienie) ZOSTAJE
+// bez zmian — to wciąż potencjalnie pomocne warstwy ochrony, tylko SAM ODCZYT PRÓBEK już nie
+// dzieje się w Javie.
 public class BackgroundRecorderService extends Service {
 
     public static final String ACTION_START = "com.pitchrec.backgroundrecorder.START";
@@ -48,17 +45,8 @@ public class BackgroundRecorderService extends Service {
 
     public static volatile String currentStatus = "NONE"; // "NONE" | "RECORDING" | "PAUSED"
 
-    private static final int SAMPLE_RATE = 44100;
-    private static final int CHANNELS = AudioFormat.CHANNEL_IN_MONO;
-    private static final int ENCODING = AudioFormat.ENCODING_PCM_16BIT;
-
-    private AudioRecord audioRecord;
-    private Thread recordThread;
-    private volatile boolean recording = false;
-    private volatile boolean paused = false;
-    private RandomAccessFile outputStream;
+    private final NativeAudioRecorder nativeRecorder = new NativeAudioRecorder();
     private File outputFile;
-    private long pcmBytesWritten = 0L;
     private long recordingStartedAt = 0L;
     private long pausedAccumMs = 0L;
     private long lastResumeAt = 0L;
@@ -74,7 +62,7 @@ public class BackgroundRecorderService extends Service {
     @Override
     public void onDestroy() {
         releaseWakeLock();
-            releaseAudioFocus();
+        releaseAudioFocus();
         releaseMediaSession();
         super.onDestroy();
     }
@@ -96,9 +84,6 @@ public class BackgroundRecorderService extends Service {
         setupMediaSession();
         Notification notification = buildNotification("Nagrywanie…");
 
-        // WAŻNE: łączymy microphone|mediaPlayback (bitwise OR) — potwierdzone w
-        // zdekompilowanej, działającej aplikacji, że to kombinacja obu typów naraz,
-        // nie sam "microphone".
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             int combinedType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                     | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
@@ -114,9 +99,6 @@ public class BackgroundRecorderService extends Service {
             wakeLock.acquire(4 * 60 * 60 * 1000L);
         } catch (Exception e) { /* ignorowane */ }
 
-        // Jawne żądanie audio focus — potwierdzone w zdekompilowanej, działającej aplikacji
-        // (RecForge), że robią to explicite. "Best effort": jeśli focus zostanie odmówiony,
-        // nagrywanie i tak kontynuuje (dokładnie tak jak oni), to nie jest twardy wymóg.
         try {
             AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -132,72 +114,21 @@ public class BackgroundRecorderService extends Service {
                 //noinspection deprecation
                 am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
             }
-        } catch (Exception e) { /* ignorowane — best effort, jak w RecForge */ }
+        } catch (Exception e) { /* ignorowane */ }
 
         try {
             outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".wav");
-            int minBufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNELS, ENCODING);
-            if (minBufferSize <= 0) throw new IOException("AudioRecord.getMinBufferSize failed: " + minBufferSize);
-            int bufferSize = minBufferSize * 4; // trochę zapasu, jak w sprawdzonych implementacjach
-
-            // EKSPERYMENT: VOICE_COMMUNICATION zamiast MIC — źródło używane przez aplikacje
-            // VoIP/telefoniczne, może mieć inny priorytet/traktowanie przez system w tle
-            // (połączenia są uznawane za funkcję wysokiego priorytetu, niemożliwą do przerwania).
-            // Zwykły MIC z każdą inną warstwą ochrony (Foreground Service, WakeLock,
-            // AudioFocus, MediaSession) nadal milknie po 5s — to jedna z niewielu rzeczy na
-            // poziomie Javy, których jeszcze nie próbowaliśmy.
-            audioRecord = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, SAMPLE_RATE, CHANNELS, ENCODING, bufferSize);
-            if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
-                throw new IOException("AudioRecord nie zainicjalizowany poprawnie");
+            boolean started = nativeRecorder.nativeStart(outputFile.getAbsolutePath());
+            if (!started) {
+                throw new IOException("nativeStart() zwrocilo false — nagrywanie nie wystartowalo");
             }
 
-            outputStream = new RandomAccessFile(outputFile, "rw");
-            writeWavHeaderPlaceholder(outputStream);
-            pcmBytesWritten = 0L;
-
-            audioRecord.startRecording();
-            if (audioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
-                throw new IOException("AudioRecord.startRecording() nie uruchomiło nagrywania");
-            }
-
-            recording = true;
-            paused = false;
             recordingStartedAt = System.currentTimeMillis();
             pausedAccumMs = 0L;
             lastResumeAt = recordingStartedAt;
             currentStatus = "RECORDING";
-
-            final int finalBufferSize = bufferSize;
-            recordThread = new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    // Wątek dedykowany wyłącznie do czytania próbek — priorytet AUDIO,
-                    // tak jak w sprawdzonych, działających implementacjach.
-                    try { Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO); } catch (Exception e) { }
-                    byte[] buffer = new byte[finalBufferSize];
-                    while (recording) {
-                        if (paused) {
-                            try { Thread.sleep(50); } catch (InterruptedException ie) { }
-                            continue;
-                        }
-                        int read = audioRecord.read(buffer, 0, buffer.length);
-                        if (read > 0) {
-                            try {
-                                outputStream.write(buffer, 0, read);
-                                pcmBytesWritten += read;
-                            } catch (IOException ioe) {
-                                // Pojedynczy błąd zapisu nie powinien ubić całej pętli —
-                                // spróbuj dalej, plik i tak będzie miał poprawną długość
-                                // ustawioną na koniec na podstawie pcmBytesWritten.
-                            }
-                        }
-                    }
-                }
-            }, "PitchRecAudioReadThread");
-            recordThread.start();
         } catch (Exception e) {
             currentStatus = "NONE";
-            cleanupAudioResources();
             releaseWakeLock();
             releaseAudioFocus();
             releaseMediaSession();
@@ -209,7 +140,7 @@ public class BackgroundRecorderService extends Service {
 
     private void handlePause() {
         if (!"RECORDING".equals(currentStatus)) return;
-        paused = true;
+        nativeRecorder.nativePause();
         pausedAccumMs += System.currentTimeMillis() - lastResumeAt;
         currentStatus = "PAUSED";
         updatePlaybackState(PlaybackState.STATE_PAUSED);
@@ -218,7 +149,7 @@ public class BackgroundRecorderService extends Service {
 
     private void handleResume() {
         if (!"PAUSED".equals(currentStatus)) return;
-        paused = false;
+        nativeRecorder.nativeResume();
         lastResumeAt = System.currentTimeMillis();
         currentStatus = "RECORDING";
         updatePlaybackState(PlaybackState.STATE_PLAYING);
@@ -233,11 +164,7 @@ public class BackgroundRecorderService extends Service {
             return;
         }
         try {
-            recording = false;
-            if (recordThread != null) {
-                try { recordThread.join(2000); } catch (InterruptedException ie) { }
-            }
-            cleanupAudioResources();
+            long pcmBytesWritten = nativeRecorder.nativeStop();
 
             if (outputFile == null || !outputFile.exists() || pcmBytesWritten == 0L) {
                 BackgroundRecorderPlugin.rejectStop("EMPTY_RECORDING", null);
@@ -258,61 +185,6 @@ public class BackgroundRecorderService extends Service {
             stopForegroundCompat();
             stopSelf();
         }
-    }
-
-    private void cleanupAudioResources() {
-        try { if (audioRecord != null) { audioRecord.stop(); audioRecord.release(); } } catch (Exception e) { }
-        audioRecord = null;
-        try {
-            if (outputStream != null) {
-                finalizeWavHeader(outputStream, pcmBytesWritten);
-                outputStream.close();
-            }
-        } catch (Exception e) { }
-        outputStream = null;
-    }
-
-    // ── Zapis WAV ręcznie (nagłówek 44 bajty, potem surowe próbki PCM 16-bit) — prostsze niż
-    // integrowanie natywnego kodera, ale zachowuje kluczową architekturę: ręczna pętla
-    // AudioRecord zamiast MediaRecorder. ──
-    private void writeWavHeaderPlaceholder(RandomAccessFile raf) throws IOException {
-        byte[] header = new byte[44];
-        raf.write(header); // wypełnione zerami na razie — prawdziwe wartości ustawiane na końcu
-    }
-
-    private void finalizeWavHeader(RandomAccessFile raf, long pcmDataSize) throws IOException {
-        long totalDataLen = pcmDataSize + 36;
-        int channels = 1;
-        int bitsPerSample = 16;
-        long byteRate = SAMPLE_RATE * channels * bitsPerSample / 8;
-        int blockAlign = channels * bitsPerSample / 8;
-
-        raf.seek(0);
-        raf.writeBytes("RIFF");
-        writeIntLE(raf, (int) totalDataLen);
-        raf.writeBytes("WAVE");
-        raf.writeBytes("fmt ");
-        writeIntLE(raf, 16); // rozmiar podchunk fmt
-        writeShortLE(raf, (short) 1); // PCM
-        writeShortLE(raf, (short) channels);
-        writeIntLE(raf, SAMPLE_RATE);
-        writeIntLE(raf, (int) byteRate);
-        writeShortLE(raf, (short) blockAlign);
-        writeShortLE(raf, (short) bitsPerSample);
-        raf.writeBytes("data");
-        writeIntLE(raf, (int) pcmDataSize);
-    }
-
-    private void writeIntLE(RandomAccessFile raf, int value) throws IOException {
-        raf.write(value & 0xff);
-        raf.write((value >> 8) & 0xff);
-        raf.write((value >> 16) & 0xff);
-        raf.write((value >> 24) & 0xff);
-    }
-
-    private void writeShortLE(RandomAccessFile raf, short value) throws IOException {
-        raf.write(value & 0xff);
-        raf.write((value >> 8) & 0xff);
     }
 
     private byte[] readFileBytes(File file) throws IOException {
