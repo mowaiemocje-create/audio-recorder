@@ -28,16 +28,15 @@ jobs:
           npm install --legacy-peer-deps
           npm install @capacitor/geolocation --save --legacy-peer-deps
 
-      - name: Install ImageMagick
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y imagemagick
-
       - name: Capacitor Sync
         run: |
           npx cap add android || true
           npx cap sync android
 
+      # Generuje WSZYSTKIE wymagane rozmiary ikony (dla każdej gęstości ekranu: mdpi, hdpi,
+      # xhdpi, xxhdpi, xxxhdpi + wersje okrągłe) z JEDNEGO pliku źródłowego logo. Logo nie
+      # musi być idealnym kwadratem — ImageMagick dopełnia je czarnym tłem (dopasowanym do
+      # tła samego logo) do kwadratu przed przekazaniem do oficjalnego narzędzia Capacitora.
       - name: Generate app icon from logo
         run: |
           npm install @capacitor/assets --save-dev --legacy-peer-deps
@@ -45,6 +44,17 @@ jobs:
           convert assets/icon-source.png -resize 1024x1024 -gravity center -background black -extent 1024x1024 assets/icon.png
           npx capacitor-assets generate --android
 
+      # UWAGA: test diagnostyczny (obniżenie targetSdkVersion do 33) POTWIERDZIŁ, że to
+      # WŁAŚNIE restrykcje Androida 15/SDK 35 blokują nagrywanie w tle — ale Google Play
+      # ostrzega/blokuje publikację aplikacji celujących w zbyt stare SDK, więc to nie jest
+      # opcja na stałe. Zostajemy na domyślnym 35 (zgodnym z wymogami sklepu) — potrzebne jest
+      # inne obejście, które nie wymaga obniżania targetSdkVersion.
+
+      # WŁASNY, ZINTEGROWANY kod natywny — MediaRecorder działa BEZPOŚREDNIO wewnątrz
+      # Foreground Service (nie jako dwie osobne, niezwiązane rzeczy). Napisane w Javie
+      # (nie Kotlinie) — potwierdzone, że domyślny projekt Capacitor 7 NIE ma wtyczki
+      # Kotlina skonfigurowanej w Gradle, więc pliki .kt zostałyby skopiowane, ale nigdy
+      # nie skompilowane (dokładnie ten błąd który wystąpił przy poprzedniej próbie).
       - name: Copy custom native recording service
         run: |
           mkdir -p android/app/src/main/java/com/pitchrec/backgroundrecorder
@@ -56,6 +66,7 @@ jobs:
           python3 -c '
           import re, glob
 
+          # ── 1. Zarejestruj wtyczkę w MainActivity (Java albo Kotlin, z lub bez istniejącego onCreate) ──
           candidates = glob.glob("android/app/src/main/java/**/MainActivity.java", recursive=True) + \
                        glob.glob("android/app/src/main/java/**/MainActivity.kt", recursive=True)
           if not candidates:
@@ -84,8 +95,11 @@ jobs:
               onCreatePattern = (r"override fun onCreate\([^)]*\)\s*\{" if is_kotlin
                                  else r"protected void onCreate\([^)]*\)\s*\{")
               if re.search(onCreatePattern, content):
+                  # onCreate juz istnieje - wstaw wywolanie na samym poczatku, PRZED super.onCreate
                   content = re.sub(onCreatePattern, lambda m: m.group(0) + "\n        " + register_call, content, count=1)
               else:
+                  # onCreate NIE istnieje (typowe w nowszych szablonach Capacitor z pusta klasa) -
+                  # trzeba dodac cala metode, nie tylko wstawic linie do nieistniejacej.
                   class_pattern = (r"(class MainActivity\s*:\s*BridgeActivity\(\)\s*\{)" if is_kotlin
                                     else r"(public class MainActivity extends BridgeActivity\s*\{)")
                   if is_kotlin:
@@ -111,6 +125,7 @@ jobs:
           with open(main_activity_path, "w") as f:
               f.write(content)
 
+          # ── 2. Uprawnienia + deklaracja <service> w AndroidManifest.xml ──
           manifest_path = "android/app/src/main/AndroidManifest.xml"
           with open(manifest_path, "r") as f:
               content = f.read()
