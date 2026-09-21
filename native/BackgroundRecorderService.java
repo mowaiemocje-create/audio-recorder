@@ -79,7 +79,7 @@ public class BackgroundRecorderService extends Service {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PitchRec:BackgroundRecorderWakeLock");
             wakeLock.setReferenceCounted(false);
             wakeLock.acquire(4 * 60 * 60 * 1000L);
-        } catch (Exception e) {}
+        } catch (Exception e) { /* ignorowane */ }
 
         try {
             outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".m4a");
@@ -117,7 +117,7 @@ public class BackgroundRecorderService extends Service {
                 updatePlaybackState(PlaybackState.STATE_PAUSED);
                 updateNotification("Pauza");
             }
-        } catch (Exception e) {}
+        } catch (Exception e) { /* ignorowane */ }
     }
 
     private void handleResume() {
@@ -130,7 +130,7 @@ public class BackgroundRecorderService extends Service {
                 updatePlaybackState(PlaybackState.STATE_PLAYING);
                 updateNotification("Nagrywanie…");
             }
-        } catch (Exception e) {}
+        } catch (Exception e) { /* ignorowane */ }
     }
 
     private void handleStop() {
@@ -155,8 +155,7 @@ public class BackgroundRecorderService extends Service {
                 outputFile.delete();
             }
         } catch (Exception e) {
-            String errMsg = e.getMessage() != null ? e.getMessage() : e.toString();
-            BackgroundRecorderPlugin.rejectStop("FAILED_TO_FETCH_RECORDING", errMsg);
+            BackgroundRecorderPlugin.rejectStop("FAILED_TO_FETCH_RECORDING", e.getMessage());
         } finally {
             currentStatus = "NONE";
             releaseWakeLock();
@@ -190,7 +189,7 @@ public class BackgroundRecorderService extends Service {
             session.setPlaybackState(state);
             session.setActive(true);
             mediaSession = session;
-        } catch (Exception e) {}
+        } catch (Exception e) { /* ignorowane */ }
     }
 
     private void updatePlaybackState(int state) {
@@ -201,7 +200,7 @@ public class BackgroundRecorderService extends Service {
                     .setState(state, 0, speed)
                     .build();
             if (mediaSession != null) mediaSession.setPlaybackState(playbackState);
-        } catch (Exception e) {}
+        } catch (Exception e) { /* ignorowane */ }
     }
 
     private void releaseMediaSession() {
@@ -210,14 +209,14 @@ public class BackgroundRecorderService extends Service {
                 mediaSession.setActive(false);
                 mediaSession.release();
             }
-        } catch (Exception e) {}
+        } catch (Exception e) { /* ignorowane */ }
         mediaSession = null;
     }
 
     private void releaseWakeLock() {
         try {
             if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
-        } catch (Exception e) {}
+        } catch (Exception e) { /* ignorowane */ }
         wakeLock = null;
     }
 
@@ -255,10 +254,10 @@ public class BackgroundRecorderService extends Service {
         if (mediaSession != null) {
             try {
                 builder.setStyle(new Notification.MediaStyle().setMediaSession(mediaSession.getSessionToken()));
-            } catch (Exception e) {}
+            } catch (Exception e) { /* ignorowane */ }
         }
 
-        return builder.build;
+        return builder.build();
     }
 
     private void updateNotification(String text) {
