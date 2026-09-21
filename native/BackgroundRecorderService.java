@@ -94,7 +94,7 @@ public class BackgroundRecorderService extends Service {
             if (pm != null) {
                 wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PitchRec:BackgroundRecorderWakeLock");
                 wakeLock.setReferenceCounted(false);
-                wakeLock.acquire(6 * 60 * 60 * 1000L); // 6 godzin blokady uśpienia
+                wakeLock.acquire(6 * 60 * 60 * 1000L);
             }
         } catch (Exception e) { }
 
