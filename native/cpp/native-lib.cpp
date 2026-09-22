@@ -134,9 +134,8 @@ Java_com_pitchrec_backgroundrecorder_NativeAudioRecorder_nativeStart(
     AAudioStreamBuilder_setChannelCount(builder, CHANNELS);
     AAudioStreamBuilder_setFormat(builder, FORMAT);
     AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
-    // AAUDIO_INPUT_PRESET_VOICE_RECOGNITION — dostrojone pod nagrywanie głosu (bez AEC
-    // wymuszonego jak przy VOICE_COMMUNICATION, ale wciąż zoptymalizowane pod mowę).
-    AAudioStreamBuilder_setInputPreset(builder, AAUDIO_INPUT_PRESET_VOICE_RECOGNITION);
+    // AAudioStreamBuilder_setInputPreset (dostrojenie pod głos) wymaga API 28, a celujemy w
+    // 26 — usunięte, to było tylko strojenie jakości, nie kluczowa funkcjonalność.
 
     result = AAudioStreamBuilder_openStream(builder, &g_stream);
     AAudioStreamBuilder_delete(builder);
