@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
+import android.media.MediaRecorder;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.os.Build;
@@ -22,18 +23,11 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.ByteArrayOutputStream;
 
-// KLUCZOWY plik całego rozwiązania: prawdziwy Android Foreground Service.
-//
-// WERSJA NATYWNA (v4): faktyczne nagrywanie (AAudio, pętla odczytu próbek, zapis WAV) zostało
-// przeniesione do kodu C++ (native-lib.cpp, przez wrapper NativeAudioRecorder) — POZA zasięg
-// Javy i jej cyklu życia. To próba obejścia ograniczenia utrzymującego się mimo wyczerpania
-// WSZYSTKICH dostępnych technik na poziomie Java (Foreground Service z poprawnym typem,
-// WakeLock, MediaSession, AudioFocus, różne AudioSource) — wciąż milkło po dokładnie 5
-// sekundach od zablokowania ekranu, mimo że serwis/powiadomienie przeżywały.
-//
-// Cała reszta (Foreground Service, MediaSession, WakeLock, AudioFocus, powiadomienie) ZOSTAJE
-// bez zmian — to wciąż potencjalnie pomocne warstwy ochrony, tylko SAM ODCZYT PRÓBEK już nie
-// dzieje się w Javie.
+// Prawdziwy Android Foreground Service z nagrywaniem MediaRecorder wewnątrz. Prosta,
+// sprawdzona wersja — działa poprawnie przy targetSdkVersion 33 (aktualnie używanym, bo
+// aplikacja jest na razie dystrybuowana bezpośrednio, nie przez Google Play). Bardziej
+// złożone podejścia (ręczna pętla AudioRecord w Javie, natywny kod C++/AAudio) były próbą
+// obejścia restrykcji specyficznych dla SDK 35 — niepotrzebne przy SDK 33.
 public class BackgroundRecorderService extends Service {
 
     public static final String ACTION_START = "com.pitchrec.backgroundrecorder.START";
@@ -45,7 +39,7 @@ public class BackgroundRecorderService extends Service {
 
     public static volatile String currentStatus = "NONE"; // "NONE" | "RECORDING" | "PAUSED"
 
-    private final NativeAudioRecorder nativeRecorder = new NativeAudioRecorder();
+    private MediaRecorder recorder;
     private File outputFile;
     private long recordingStartedAt = 0L;
     private long pausedAccumMs = 0L;
@@ -117,11 +111,16 @@ public class BackgroundRecorderService extends Service {
         } catch (Exception e) { /* ignorowane */ }
 
         try {
-            outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".wav");
-            boolean started = nativeRecorder.nativeStart(outputFile.getAbsolutePath());
-            if (!started) {
-                throw new IOException("nativeStart() zwrocilo false — nagrywanie nie wystartowalo");
-            }
+            outputFile = new File(getCacheDir(), "bg_recording_" + System.currentTimeMillis() + ".m4a");
+            recorder = new MediaRecorder();
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            recorder.setAudioEncodingBitRate(192000);
+            recorder.setAudioSamplingRate(44100);
+            recorder.setOutputFile(outputFile.getAbsolutePath());
+            recorder.prepare();
+            recorder.start();
 
             recordingStartedAt = System.currentTimeMillis();
             pausedAccumMs = 0L;
@@ -140,20 +139,28 @@ public class BackgroundRecorderService extends Service {
 
     private void handlePause() {
         if (!"RECORDING".equals(currentStatus)) return;
-        nativeRecorder.nativePause();
-        pausedAccumMs += System.currentTimeMillis() - lastResumeAt;
-        currentStatus = "PAUSED";
-        updatePlaybackState(PlaybackState.STATE_PAUSED);
-        updateNotification("Pauza");
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                recorder.pause();
+                pausedAccumMs += System.currentTimeMillis() - lastResumeAt;
+                currentStatus = "PAUSED";
+                updatePlaybackState(PlaybackState.STATE_PAUSED);
+                updateNotification("Pauza");
+            }
+        } catch (Exception e) { /* ignorowane */ }
     }
 
     private void handleResume() {
         if (!"PAUSED".equals(currentStatus)) return;
-        nativeRecorder.nativeResume();
-        lastResumeAt = System.currentTimeMillis();
-        currentStatus = "RECORDING";
-        updatePlaybackState(PlaybackState.STATE_PLAYING);
-        updateNotification("Nagrywanie…");
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                recorder.resume();
+                lastResumeAt = System.currentTimeMillis();
+                currentStatus = "RECORDING";
+                updatePlaybackState(PlaybackState.STATE_PLAYING);
+                updateNotification("Nagrywanie…");
+            }
+        } catch (Exception e) { /* ignorowane */ }
     }
 
     private void handleStop() {
@@ -164,15 +171,17 @@ public class BackgroundRecorderService extends Service {
             return;
         }
         try {
-            long pcmBytesWritten = nativeRecorder.nativeStop();
+            recorder.stop();
+            recorder.release();
+            recorder = null;
 
-            if (outputFile == null || !outputFile.exists() || pcmBytesWritten == 0L) {
+            if (outputFile == null || !outputFile.exists() || outputFile.length() == 0L) {
                 BackgroundRecorderPlugin.rejectStop("EMPTY_RECORDING", null);
             } else {
                 long durationMs = System.currentTimeMillis() - recordingStartedAt - pausedAccumMs;
                 byte[] bytes = readFileBytes(outputFile);
                 String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
-                BackgroundRecorderPlugin.resolveStop(base64, durationMs, "audio/wav");
+                BackgroundRecorderPlugin.resolveStop(base64, durationMs, "audio/mp4");
                 outputFile.delete();
             }
         } catch (Exception e) {

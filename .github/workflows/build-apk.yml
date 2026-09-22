@@ -45,75 +45,31 @@ jobs:
           convert assets/icon-source.png -resize 1024x1024 -gravity center -background black -extent 1024x1024 assets/icon.png
           npx capacitor-assets generate --android
 
-      # UWAGA: test diagnostyczny (obniżenie targetSdkVersion do 33) POTWIERDZIŁ, że to
-      # WŁAŚNIE restrykcje Androida 15/SDK 35 blokują nagrywanie w tle — ale Google Play
-      # ostrzega/blokuje publikację aplikacji celujących w zbyt stare SDK, więc to nie jest
-      # opcja na stałe. Zostajemy na domyślnym 35 (zgodnym z wymogami sklepu) — potrzebne jest
-      # inne obejście, które nie wymaga obniżania targetSdkVersion.
+      # UWAGA: potwierdzone testem, że to WŁAŚNIE restrykcje Androida 15/SDK 35 blokują
+      # nagrywanie w tle na zablokowanym ekranie. Próba obejścia tego przy zachowaniu SDK 35
+      # (Foreground Service + WakeLock + MediaSession + AudioFocus + natywny kod C++/AAudio)
+      # nie pomogła — trzy fundamentalnie różne podejścia dały dokładnie ten sam efekt (5s),
+      # co wskazuje że problem jest poza samym mechanizmem nagrywania.
+      #
+      # Skoro na razie dystrybucja jest BEZPOŚREDNIA (nie przez Google Play), ograniczenie
+      # targetSdkVersion do 33 nie ma żadnych konsekwencji — to tylko wymóg SKLEPU, nie
+      # samego Androida. Prosta, potwierdzona działająca droga zamiast dalszej komplikacji.
+      # Gdy w przyszłości będzie potrzebna publikacja na Google Play, trzeba będzie wrócić do
+      # tego tematu i podnieść SDK ponownie (Play wymaga aktualnego celu w ciągu ~1 roku od
+      # najnowszej wersji Androida).
+      - name: DOWNGRADE targetSdkVersion to 33 (direct distribution only, not for Play Store)
+        run: |
+          sed -i 's/targetSdkVersion = 35/targetSdkVersion = 33/' android/variables.gradle
+          cat android/variables.gradle
 
-      # WŁASNY, ZINTEGROWANY kod natywny — teraz w DWÓCH warstwach:
-      # 1. Java (BackgroundRecorderService) — Foreground Service, MediaSession, WakeLock,
-      #    AudioFocus, powiadomienie — cała "otoczka" ochronna.
-      # 2. C++ (native-lib.cpp, przez AAudio) — SAMO nagrywanie (pętla odczytu próbek, zapis
-      #    WAV) przeniesione POZA Javę, po tym jak wszystkie techniki na poziomie Java
-      #    (nawet dokładnie odtwarzające potwierdzony, działający wzorzec z zdekompilowanej
-      #    aplikacji) nie rozwiązały problemu ucinania nagrywania po 5s od zablokowania ekranu.
-      - name: Copy custom native recording service (Java + C++)
+      # Prosta, sprawdzona implementacja Java (MediaRecorder wewnątrz Foreground Service) —
+      # nie potrzebujemy już natywnego kodu C++/AAudio, skoro problem był specyficzny dla
+      # SDK 35, a teraz celujemy w 33.
+      - name: Copy custom native recording service
         run: |
           mkdir -p android/app/src/main/java/com/pitchrec/backgroundrecorder
           cp native/BackgroundRecorderPlugin.java android/app/src/main/java/com/pitchrec/backgroundrecorder/
           cp native/BackgroundRecorderService.java android/app/src/main/java/com/pitchrec/backgroundrecorder/
-          cp native/NativeAudioRecorder.java android/app/src/main/java/com/pitchrec/backgroundrecorder/
-          mkdir -p android/app/src/main/cpp
-          cp native/cpp/native-lib.cpp android/app/src/main/cpp/
-          cp native/cpp/CMakeLists.txt android/app/src/main/cpp/
-
-      - name: Configure Gradle for native C++ build (CMake)
-        run: |
-          python3 -c '
-          import re
-          path = "android/app/build.gradle"
-          with open(path, "r") as f:
-              content = f.read()
-
-          # Podnies minSdkVersion do 26 (Android 8.0) — AAudio, ktorego uzywa natywna
-          # biblioteka nagrywania, wymaga API 26+. Bez tego aplikacja instalowalaby sie na
-          # starszych telefonach (API 23-25), ale rozbijalaby sie przy probie nagrywania.
-          content = re.sub(
-              r"minSdkVersion rootProject\.ext\.minSdkVersion",
-              "minSdkVersion 26",
-              content
-          )
-
-          default_config_addition = """        ndk {
-              abiFilters \"arm64-v8a\", \"armeabi-v7a\"
-          }
-          externalNativeBuild {
-              cmake {
-                  cppFlags \"\"
-                  arguments \"-DANDROID_PLATFORM=android-26\"
-              }
-          }
-          """
-          marker = "testInstrumentationRunner \"androidx.test.runner.AndroidJUnitRunner\"\n"
-          if marker in content and "externalNativeBuild" not in content:
-              content = content.replace(marker, marker + default_config_addition)
-
-          android_level_addition = """    externalNativeBuild {
-              cmake {
-                  path \"src/main/cpp/CMakeLists.txt\"
-                  version \"3.22.1\"
-              }
-          }
-          """
-          marker2 = "    buildTypes {\n"
-          if marker2 in content and "src/main/cpp/CMakeLists.txt" not in content:
-              content = content.replace(marker2, android_level_addition + marker2)
-
-          with open(path, "w") as f:
-              f.write(content)
-          print("build.gradle skonfigurowany dla CMake")
-          '
 
       - name: Register plugin, add manifest permissions and service declaration
         run: |

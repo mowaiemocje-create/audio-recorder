@@ -1,4 +1,4 @@
-const CACHE = 'pitchrec-v277';
+const CACHE = 'pitchrec-v278';
 const ASSETS = ['/', '/index.html', '/manifest.json', '/shared.js', '/train.html'];
 
 self.addEventListener('install', e => {
